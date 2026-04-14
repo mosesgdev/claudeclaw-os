@@ -589,7 +589,7 @@ Open your terminal and paste this command:
 node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 ```
 
-It prints a long random string like `a3f8c2d1e5b794...`. this is your dashboard password. **Copy it.** You'll need it in the next step.
+It prints a long random string like `a3f8c2d1e5b794...`. This is your dashboard password. **Copy it.** You'll need it in the next step.
 
 #### Step 2: Add the password to your settings
 
@@ -635,7 +635,7 @@ If that's all you need, stop here. The next step is only if you want to access t
 
 #### Step 5 (optional). Access from your phone anywhere
 
-Right now the dashboard only works when you're on the same computer. To open it from your phone (or anywhere), you need a "tunnel". a free service that securely connects your computer to the internet without opening any ports.
+Right now the dashboard only works when you're on the same computer. To open it from your phone (or anywhere), you need a "tunnel". A free service that securely connects your computer to the internet without opening any ports.
 
 **Option A: Quick tunnel** (free, takes 2 minutes, but the link changes every time you restart)
 
@@ -728,7 +728,7 @@ brew services start cloudflared
 - **The dashboard link contains your password.** Treat it like you'd treat a password. Don't screenshot the address bar and post it somewhere. The dashboard can only show data (nobody can change or delete anything through it), but your task details and memory content would be visible.
 - **If the bot stops, the dashboard stops.** They run together. Restart the bot and the dashboard comes back automatically.
 - **Quick tunnel links are temporary.** If you used Option A and restart the tunnel tool, you get a new URL and the old one stops working. Option B (permanent URL) doesn't have this problem.
-- **For extra security:** Cloudflare Access (free for up to 50 users) can add a login page in front of the dashboard, so even if someone finds the URL they'd need to authenticate. This is optional. the token alone is fine for personal use.
+- **For extra security:** Cloudflare Access (free for up to 50 users) can add a login page in front of the dashboard, so even if someone finds the URL they'd need to authenticate. This is optional. The token alone is fine for personal use.
 
 <details>
 <summary><strong>Dashboard API reference (for developers)</strong></summary>
@@ -1147,7 +1147,7 @@ SELECT * FROM sessions;
 
 ## Customizing your assistant (CLAUDE.md)
 
-`CLAUDE.md` is loaded into every Claude Code session. It's the personality and context file. the main thing to edit to make ClaudeClaw yours.
+`CLAUDE.md` is loaded into every Claude Code session. It's the personality and context file. The main thing to edit to make ClaudeClaw OS yours.
 
 The sections that matter most:
 
@@ -1455,7 +1455,7 @@ Or view it in the dashboard via the API: `GET /api/audit?limit=50`.
 - Send `/newchat` for a fresh start
 
 **File downloads fail**
-- Telegram caps downloads at 20MB. this is a Telegram API limit, not a ClaudeClaw one
+- Telegram caps downloads at 20MB. This is a Telegram API limit, not a ClaudeClaw OS one
 
 ---
 
