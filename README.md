@@ -239,7 +239,7 @@ Then restart the bot (Ctrl+C and `npm start`, or restart the background service)
 
 ## How it works
 
-![ClaudeClaw architecture](assets/architecture.png)
+![ClaudeClaw OS architecture](assets/architecture.jpeg)
 
 ## What's included
 
@@ -329,7 +329,6 @@ The skill reads `GOOGLE_API_KEY` from the environment automatically.
 
 > ClaudeClaw ships with bundled Gmail and Google Calendar skills that work great out of the box. This is an **optional alternative** if you want broader Google Workspace access from a single tool.
 
-[![Google Workspace CLI announcement](assets/workspace-cli-tweet.png)](https://x.com/addyosmani/status/2029372736267805081)
 
 Google released an official CLI that covers Drive, Gmail, Calendar, Sheets, Docs, Chat, Admin, and every other Workspace API in one tool. It's dynamically built from Google Discovery Service and includes 40+ agent skills out of the box.
 
@@ -524,13 +523,12 @@ Type anything that isn't a number or `r <text>` to exit Slack mode and return to
 
 ## Dashboard (optional)
 
-![Dashboard preview](assets/dashboard-preview.png)
 
 A live web page that shows you everything happening inside your assistant: what tasks are scheduled, what it remembers, how much you're spending, and whether it's healthy. You open it from Telegram with one tap.
 
 ### How the dashboard works
 
-![Dashboard architecture](assets/dashboard-architecture.png)
+![ClaudeClaw OS dashboard architecture](assets/dashboard-architecture.jpeg)
 
 When you start ClaudeClaw, a small web page starts running alongside the bot. It reads directly from the same database the bot uses and shows you the data in real time.
 
@@ -938,7 +936,7 @@ The `store/` directory (database, WhatsApp session, logs) is gitignored with mul
 
 ## Memory
 
-![ClaudeClaw memory system diagram](assets/memory-diagram.png)
+![ClaudeClaw OS memory system](assets/memory-diagram.jpeg)
 
 ClaudeClaw has a structured memory system that extracts, consolidates, and recalls knowledge across all sessions. Everything is automatic.
 
@@ -1615,7 +1613,7 @@ ClaudeClaw can run **specialist agents** alongside the main bot. Each agent is i
 
 *Example setup: Comms, Content, Ops, and Research agents, each with a pop-art avatar generated via Gemini.*
 
-![Multi-agent architecture](assets/multi-agent-architecture.png)
+![ClaudeClaw OS multi-agent architecture](assets/multi-agent-architecture.jpeg)
 
 ### Why agents?
 
