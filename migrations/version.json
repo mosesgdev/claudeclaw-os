@@ -5,6 +5,9 @@
     ],
     "0.1.1": [
       "add-memory-vault-links"
+    ],
+    "0.1.2": [
+      "add-subagent-sessions"
     ]
   }
 }

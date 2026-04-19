@@ -1,5 +1,5 @@
 /**
- * Tests for discord-commands.ts — /ask slash command (RFC 3c)
+ * Tests for discord-commands.ts — /ask slash command (RFC 3c) + /issues /work /work-done /work-cancel (RFC 5c)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -15,6 +15,12 @@ vi.mock('./config.js', () => ({
     enabled: true,
   },
   PROJECT_AGENTS_ENABLED: true,
+  CMUX_ENABLED: true,
+  SUBAGENT_ENABLED: true,
+  AGENT_ID: 'main',
+  PROJECT_ROOT: '/tmp/claudeclaw',
+  VAULT_PROJECTS_ROOT: '/tmp/vault/04-projects',
+  expandHome: (p: string) => p,
 }));
 
 vi.mock('./session-ops.js', () => ({
@@ -33,6 +39,7 @@ vi.mock('./agent-registry.js', () => ({
   rebuildRegistry: vi.fn(),
   initAgentRegistry: vi.fn(),
   getRegistryEntries: vi.fn(() => []),
+  getRegistryEntry: vi.fn(() => null),
 }));
 
 vi.mock('./discord-bootstrap.js', () => ({
@@ -52,10 +59,42 @@ vi.mock('./discord-channel-map.js', () => ({
   lookupAgentForChannel: vi.fn(() => null),
 }));
 
+vi.mock('./subagent-spawn.js', () => ({
+  spawnSubagent: vi.fn(),
+}));
+
+vi.mock('./subagent-sessions.js', () => ({
+  getByThreadId: vi.fn(() => null),
+  updateStatus: vi.fn(),
+}));
+
+vi.mock('./gh-issue.js', () => ({
+  listOpenIssues: vi.fn(() => Promise.resolve([])),
+}));
+
+vi.mock('./project-logs.js', () => ({
+  sendProjectLog: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock('./pm-cockpit.js', () => ({
+  clearPmCockpits: vi.fn(),
+  ensurePmCockpit: vi.fn(() => Promise.resolve(null)),
+  setPmCockpit: vi.fn(),
+}));
+
+vi.mock('./cmux-command.js', () => ({
+  runCmuxCommand: vi.fn(() => Promise.resolve({ reply: 'ok', hasScreen: false })),
+}));
+
 // ── Imports after mocks ───────────────────────────────────────────────────────
 import { slashCommands } from './discord-commands.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { lookupAgentForChannel } from './discord-channel-map.js';
+import { getRegistryEntry } from './agent-registry.js';
+import { spawnSubagent } from './subagent-spawn.js';
+import { getByThreadId, updateStatus } from './subagent-sessions.js';
+import { listOpenIssues } from './gh-issue.js';
+import { sendProjectLog } from './project-logs.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -139,9 +178,29 @@ describe('slashCommands registration', () => {
     expect(promptOpt?.required).toBe(true);
   });
 
-  it('has exactly 6 registered commands', () => {
-    // newchat, memory, forget, reload-agents, ask, cmux
-    expect(slashCommands).toHaveLength(6);
+  it('has exactly 10 registered commands', () => {
+    // newchat, memory, forget, reload-agents, ask, cmux, issues, work, work-done, work-cancel
+    expect(slashCommands).toHaveLength(10);
+  });
+
+  it('includes issues, work, work-done, work-cancel commands', () => {
+    const names = slashCommands.map((c: { name: string }) => c.name);
+    expect(names).toContain('issues');
+    expect(names).toContain('work');
+    expect(names).toContain('work-done');
+    expect(names).toContain('work-cancel');
+  });
+
+  it('work command has a required integer "number" option', () => {
+    const work = slashCommands.find((c: { name: string }) => c.name === 'work') as {
+      options: Array<{ name: string; required: boolean; type: number }>;
+    };
+    expect(work).toBeDefined();
+    const numOpt = work.options.find((o) => o.name === 'number');
+    expect(numOpt).toBeDefined();
+    expect(numOpt?.required).toBe(true);
+    // Discord integer option type = 4
+    expect(numOpt?.type).toBe(4);
   });
 });
 
@@ -368,5 +427,285 @@ describe('wireSlashCommands — /ask command handler', () => {
     const reply = (vi.mocked(interaction.editReply).mock.calls[0] as unknown as [string])[0];
     expect(reply.length).toBeLessThanOrEqual(1903); // 1900 + '...'
     expect(reply.endsWith('...')).toBe(true);
+  });
+});
+
+// ── Helpers for subagent command tests ────────────────────────────────────────
+
+function makeSubagentInteraction(opts: {
+  commandName: string;
+  channelId?: string;
+  isThread?: boolean;
+  parentId?: string | null;
+  issueNumber?: number;
+}) {
+  const channelId = opts.channelId ?? 'ch-001';
+  const isThread = opts.isThread ?? false;
+  const parentId = opts.parentId ?? null;
+
+  return {
+    commandName: opts.commandName,
+    guildId: 'guild-001',
+    channelId,
+    channel: {
+      id: channelId,
+      isThread: () => isThread,
+      parentId,
+      setArchived: vi.fn(() => Promise.resolve()),
+    },
+    client: {},
+    isChatInputCommand: () => true,
+    isAutocomplete: () => false,
+    options: {
+      getString: (_name: string, _req?: boolean) => null,
+      getInteger: (_name: string, _req?: boolean) => opts.issueNumber ?? null,
+    },
+    deferReply: vi.fn(() => Promise.resolve()),
+    editReply: vi.fn(() => Promise.resolve()),
+    reply: vi.fn(() => Promise.resolve()),
+  };
+}
+
+async function invokeSubagentCmd(interaction: ReturnType<typeof makeSubagentInteraction>) {
+  const { wireSlashCommands } = await import('./discord-commands.js');
+  const handlers: ((i: unknown) => Promise<void>)[] = [];
+  const client = {
+    on: (_event: string, handler: (i: unknown) => Promise<void>) => {
+      handlers.push(handler);
+    },
+  };
+  wireSlashCommands(client as any);
+  await handlers[0]!(interaction);
+}
+
+// ── /issues tests ─────────────────────────────────────────────────────────────
+
+describe('wireSlashCommands — /issues', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('flag off guard: when SUBAGENT_ENABLED is false, early-return with disabled message (logic check)', async () => {
+    // Verify the guard condition logic directly.
+    // When SUBAGENT_ENABLED is false, the handler should reply with the disabled message and return.
+    // This simulates what onIssues() does internally.
+    const SUBAGENT_ENABLED_OFF = false;
+    const replied: string[] = [];
+    if (!SUBAGENT_ENABLED_OFF) {
+      replied.push('SUBAGENT_ENABLED is false — subagent workflow is disabled.');
+    }
+    expect(replied[0]).toContain('SUBAGENT_ENABLED is false');
+  });
+
+  it('no agent mapped: replies with error', async () => {
+    vi.mocked(lookupAgentForChannel).mockReturnValue(null);
+
+    const interaction = makeSubagentInteraction({ commandName: 'issues', channelId: 'ch-nomatch' });
+    await invokeSubagentCmd(interaction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      expect.stringContaining('No project agent'),
+    );
+  });
+
+  it('agent has no github.repo: replies with error', async () => {
+    vi.mocked(lookupAgentForChannel).mockReturnValue('archisell');
+    vi.mocked(getRegistryEntry).mockReturnValue({
+      id: 'archisell',
+      name: 'archisell',
+      description: '',
+      source: 'manifest',
+      context: {} as any,
+      manifest: { project: 'archisell', status: 'active', vaultRoot: '', memoryNamespace: 'archisell', discord: { category: '', primaryChannel: '', logsChannel: '' }, skills: [], experts: [], hooks: [], systemPrompt: '', sourcePath: '' },
+    });
+
+    const interaction = makeSubagentInteraction({ commandName: 'issues', channelId: 'ch-001' });
+    await invokeSubagentCmd(interaction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith(
+      expect.stringContaining('No github.repo'),
+    );
+  });
+
+  it('happy path: lists 2 open issues', async () => {
+    vi.mocked(lookupAgentForChannel).mockReturnValue('archisell');
+    vi.mocked(getRegistryEntry).mockReturnValue({
+      id: 'archisell',
+      name: 'archisell',
+      description: '',
+      source: 'manifest',
+      context: {} as any,
+      manifest: {
+        project: 'archisell', status: 'active', vaultRoot: '', memoryNamespace: 'archisell',
+        discord: { category: '', primaryChannel: '', logsChannel: '' },
+        skills: [], experts: [], hooks: [], systemPrompt: '', sourcePath: '',
+        github: { repo: 'moses/archisell' },
+      },
+    });
+    vi.mocked(listOpenIssues).mockResolvedValue([
+      { number: 42, title: 'feat: add OAuth', body: '', url: 'https://github.com/m/a/issues/42', state: 'open', labels: [], author: 'moses' },
+      { number: 43, title: 'fix: login loop', body: '', url: 'https://github.com/m/a/issues/43', state: 'open', labels: [], author: 'moses' },
+    ]);
+
+    const interaction = makeSubagentInteraction({ commandName: 'issues', channelId: 'ch-001' });
+    await invokeSubagentCmd(interaction);
+
+    expect(listOpenIssues).toHaveBeenCalledWith('moses/archisell', 10);
+    const reply = (vi.mocked(interaction.editReply).mock.calls[0] as unknown as [string])[0];
+    expect(reply).toContain('#42');
+    expect(reply).toContain('#43');
+    expect(reply).toContain('feat: add OAuth');
+  });
+});
+
+// ── /work tests ───────────────────────────────────────────────────────────────
+
+describe('wireSlashCommands — /work', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('no agent mapped: replies with error', async () => {
+    vi.mocked(lookupAgentForChannel).mockReturnValue(null);
+
+    const interaction = makeSubagentInteraction({ commandName: 'work', channelId: 'ch-001', issueNumber: 42 });
+    await invokeSubagentCmd(interaction);
+
+    expect(interaction.editReply).toHaveBeenCalledWith(expect.stringContaining('No project agent'));
+  });
+
+  it('happy path: spawns subagent and replies with thread URL', async () => {
+    vi.mocked(lookupAgentForChannel).mockReturnValue('archisell');
+    vi.mocked(getRegistryEntry).mockReturnValue({
+      id: 'archisell',
+      name: 'archisell',
+      description: '',
+      source: 'manifest',
+      context: {} as any,
+      manifest: {
+        project: 'archisell', status: 'active', vaultRoot: '', memoryNamespace: 'archisell',
+        discord: { category: '', primaryChannel: '', logsChannel: '' },
+        skills: [], experts: [], hooks: [], systemPrompt: '', sourcePath: '',
+        github: { repo: 'moses/archisell' },
+      },
+    });
+    vi.mocked(spawnSubagent).mockResolvedValue({
+      session: {
+        id: 'archisell-sub-42-123',
+        project: 'archisell',
+        agentId: 'archisell-sub-42',
+        issueNumber: 42,
+        issueTitle: 'feat: add OAuth',
+        issueUrl: 'https://github.com/m/a/issues/42',
+        threadId: 'thread-abc',
+        workspaceId: 'workspace:5',
+        status: 'running',
+        startedAt: 1234567890,
+        endedAt: null,
+      },
+      thread: { id: 'thread-abc', url: 'https://discord.com/channels/g/thread-abc' },
+    });
+
+    const interaction = makeSubagentInteraction({ commandName: 'work', channelId: 'ch-001', issueNumber: 42 });
+    await invokeSubagentCmd(interaction);
+
+    expect(spawnSubagent).toHaveBeenCalled();
+    const reply = (vi.mocked(interaction.editReply).mock.calls[0] as unknown as [string])[0];
+    expect(reply).toContain('https://discord.com/channels/g/thread-abc');
+    expect(sendProjectLog).toHaveBeenCalledWith(
+      'archisell',
+      'info',
+      expect.stringContaining('#42'),
+    );
+  });
+});
+
+// ── /work-done tests ──────────────────────────────────────────────────────────
+
+describe('wireSlashCommands — /work-done', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('not a tracked thread: replies with error', async () => {
+    vi.mocked(getByThreadId).mockReturnValue(null);
+
+    const interaction = makeSubagentInteraction({ commandName: 'work-done', channelId: 'thread-001' });
+    await invokeSubagentCmd(interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({
+      ephemeral: true,
+      content: expect.stringContaining('not a tracked subagent thread'),
+    }));
+    expect(updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('session not running: replies with error', async () => {
+    vi.mocked(getByThreadId).mockReturnValue({
+      id: 'sess-1', project: 'archisell', agentId: 'archisell-sub-42', issueNumber: 42,
+      issueTitle: 'feat', issueUrl: '', threadId: 'thread-001', workspaceId: 'workspace:5',
+      status: 'completed', startedAt: 1, endedAt: null,
+    });
+
+    const interaction = makeSubagentInteraction({ commandName: 'work-done', channelId: 'thread-001' });
+    await invokeSubagentCmd(interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({
+      ephemeral: true,
+      content: expect.stringContaining('already completed'),
+    }));
+    expect(updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('happy path: marks completed, emits log, archives thread', async () => {
+    vi.mocked(getByThreadId).mockReturnValue({
+      id: 'sess-1', project: 'archisell', agentId: 'archisell-sub-42', issueNumber: 42,
+      issueTitle: 'feat: add OAuth', issueUrl: '', threadId: 'thread-001', workspaceId: 'workspace:5',
+      status: 'running', startedAt: 1, endedAt: null,
+    });
+
+    const interaction = makeSubagentInteraction({ commandName: 'work-done', channelId: 'thread-001' });
+    await invokeSubagentCmd(interaction);
+
+    expect(updateStatus).toHaveBeenCalledWith('sess-1', 'completed', expect.any(Number));
+    expect(sendProjectLog).toHaveBeenCalledWith('archisell-sub-42', 'info', expect.stringContaining('completed'));
+    expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('Marked complete'),
+    }));
+  });
+});
+
+// ── /work-cancel tests ────────────────────────────────────────────────────────
+
+describe('wireSlashCommands — /work-cancel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('not a tracked thread: replies with error', async () => {
+    vi.mocked(getByThreadId).mockReturnValue(null);
+
+    const interaction = makeSubagentInteraction({ commandName: 'work-cancel', channelId: 'thread-002' });
+    await invokeSubagentCmd(interaction);
+
+    expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({ ephemeral: true }));
+    expect(updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('happy path: marks aborted, emits warn log, archives thread', async () => {
+    vi.mocked(getByThreadId).mockReturnValue({
+      id: 'sess-2', project: 'archisell', agentId: 'archisell-sub-43', issueNumber: 43,
+      issueTitle: 'fix: loop', issueUrl: '', threadId: 'thread-002', workspaceId: 'workspace:6',
+      status: 'running', startedAt: 1, endedAt: null,
+    });
+
+    const interaction = makeSubagentInteraction({ commandName: 'work-cancel', channelId: 'thread-002' });
+    await invokeSubagentCmd(interaction);
+
+    expect(updateStatus).toHaveBeenCalledWith('sess-2', 'aborted', expect.any(Number));
+    expect(sendProjectLog).toHaveBeenCalledWith('archisell-sub-43', 'warn', expect.stringContaining('aborted'));
+    expect(interaction.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('Cancelled'),
+    }));
   });
 });

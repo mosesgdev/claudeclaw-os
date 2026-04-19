@@ -47,6 +47,7 @@ const envConfig = readEnvFile([
   'AGENTIC_MASTER_ROOT',
   'OBSIDIAN_WRITE_ENABLED',
   'CMUX_ENABLED',
+  'SUBAGENT_ENABLED',
 ]);
 
 // ── Multi-agent support ──────────────────────────────────────────────
@@ -327,6 +328,10 @@ export const OBSIDIAN_WRITE_ENABLED =
 // Requires cmux.app installed at /Applications/cmux.app. Default: false.
 export const CMUX_ENABLED =
   (process.env.CMUX_ENABLED || envConfig.CMUX_ENABLED || 'false').toLowerCase() === 'true';
+
+// Gates /work, /issues, and subagent thread routing. Requires PROJECT_AGENTS_ENABLED + CMUX_ENABLED. Default: false.
+export const SUBAGENT_ENABLED =
+  (process.env.SUBAGENT_ENABLED || envConfig.SUBAGENT_ENABLED || 'false').toLowerCase() === 'true';
 
 // ── Discord Gateway ──────────────────────────────────────────────────
 export const discordConfig = {

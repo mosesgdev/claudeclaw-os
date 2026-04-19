@@ -175,6 +175,64 @@ Body.
     expect(manifest!.discord.logsChannel).toBe('logs');
   });
 
+  it('parses explicit working_dir into workingDir (no ~ expansion)', () => {
+    const content = `---
+project: archisell
+status: active
+vault_root: 04-projects/archisell
+memory_namespace: archisell
+discord:
+  category: archisell
+  primary_channel: pm-archisell
+working_dir: ~/Projects/foo
+---
+Body.
+`;
+    const filePath = mkProject('workingdir-explicit', content);
+    const manifest = parseManifest(filePath);
+
+    expect(manifest).not.toBeNull();
+    // The parser must NOT expand ~ — that's the caller's responsibility.
+    expect(manifest!.workingDir).toBe('~/Projects/foo');
+  });
+
+  it('leaves workingDir undefined when working_dir is omitted', () => {
+    const filePath = mkProject('workingdir-absent', VALID_FRONTMATTER);
+    const manifest = parseManifest(filePath);
+
+    expect(manifest).not.toBeNull();
+    expect(manifest!.workingDir).toBeUndefined();
+  });
+
+  it('parses github.repo from frontmatter', () => {
+    const content = `---
+project: archisell
+status: active
+vault_root: 04-projects/archisell
+memory_namespace: archisell
+discord:
+  category: archisell
+  primary_channel: pm-archisell
+github:
+  repo: moses/archisell
+---
+Body.
+`;
+    const filePath = mkProject('github-repo', content);
+    const manifest = parseManifest(filePath);
+
+    expect(manifest).not.toBeNull();
+    expect(manifest!.github).toEqual({ repo: 'moses/archisell' });
+  });
+
+  it('leaves github undefined when github block is absent', () => {
+    const filePath = mkProject('no-github', VALID_FRONTMATTER);
+    const manifest = parseManifest(filePath);
+
+    expect(manifest).not.toBeNull();
+    expect(manifest!.github).toBeUndefined();
+  });
+
   it('defaults skills, experts, hooks to empty arrays when omitted', () => {
     const content = `---
 project: minimal

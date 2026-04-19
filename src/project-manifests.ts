@@ -17,6 +17,10 @@ export interface ProjectManifest {
   hooks: string[];
   systemPrompt: string;
   sourcePath: string;
+  /** Optional working directory for the project agent's cockpit. Not expanded here — caller uses expandHome. */
+  workingDir?: string;
+  /** Optional GitHub integration. When present, enables /issues and /work commands. */
+  github?: { repo: string };
 }
 
 /**
@@ -91,6 +95,19 @@ export function parseManifest(filePath: string): ProjectManifest | null {
     hooks: Array.isArray(data['hooks']) ? (data['hooks'] as string[]) : [],
     systemPrompt: parsed.content.trim(),
     sourcePath: path.resolve(filePath),
+    workingDir:
+      typeof data['working_dir'] === 'string' && data['working_dir']
+        ? (data['working_dir'] as string)
+        : undefined,
+    github: (() => {
+      try {
+        const gh = data['github'] as Record<string, unknown> | undefined;
+        if (gh && typeof gh === 'object' && typeof gh['repo'] === 'string' && gh['repo']) {
+          return { repo: gh['repo'] as string };
+        }
+      } catch { /* malformed — treat as absent */ }
+      return undefined;
+    })(),
   };
 }
 

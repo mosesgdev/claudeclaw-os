@@ -9,7 +9,9 @@ import { createDiscordBot } from './discord-bot.js';
 import { bootstrapDiscordChannelMap } from './discord-bootstrap.js';
 import { setProjectLogsSender } from './project-logs.js';
 import { checkPendingMigrations } from './migrations.js';
-import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, SECURITY_PIN_HASH, IDLE_LOCK_MINUTES, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, discordConfig } from './config.js';
+import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, SECURITY_PIN_HASH, IDLE_LOCK_MINUTES, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, discordConfig, PROJECT_AGENTS_ENABLED, CMUX_ENABLED, expandHome } from './config.js';
+import { getRegistryEntries } from './agent-registry.js';
+import { ensurePmCockpit, setPmCockpit, clearPmCockpits } from './pm-cockpit.js';
 import { startDashboard } from './dashboard.js';
 import { initDatabase, cleanupOldMissionTasks, insertAuditLog } from './db.js';
 import { initSecurity, setAuditCallback } from './security.js';
@@ -429,6 +431,35 @@ async function main(): Promise<void> {
             }
           });
           await bootstrapDiscordChannelMap(discordClient);
+
+          // Phase 5a: ensure a persistent PM cockpit workspace per active project agent.
+          if (PROJECT_AGENTS_ENABLED && CMUX_ENABLED) {
+            clearPmCockpits();
+            const manifestEntries = getRegistryEntries().filter((e) => e.source === 'manifest');
+            for (const entry of manifestEntries) {
+              const workingDir = entry.manifest?.workingDir
+                ? expandHome(entry.manifest.workingDir)
+                : PROJECT_ROOT;
+              try {
+                const cockpit = await ensurePmCockpit(entry.id, workingDir);
+                if (cockpit) {
+                  setPmCockpit(cockpit);
+                  logger.info(
+                    { agentId: entry.id, workspaceId: cockpit.workspaceId, cwd: workingDir },
+                    `Ensured PM cockpit for ${entry.id} → ${cockpit.workspaceId} (cwd: ${workingDir})`,
+                  );
+                } else {
+                  logger.warn(
+                    { agentId: entry.id },
+                    `pm-cockpit: failed to ensure workspace for ${entry.id} — falling back to runAgent`,
+                  );
+                }
+              } catch (err) {
+                logger.warn({ agentId: entry.id, err }, 'pm-cockpit: unexpected error during bootstrap');
+              }
+            }
+          }
+
           setProjectLogsSender(async (channelId, content) => {
             const ch = await discordClient.channels.fetch(channelId);
             if (ch && 'send' in ch && typeof ch.send === 'function') {

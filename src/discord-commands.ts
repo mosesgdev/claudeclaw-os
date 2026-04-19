@@ -7,15 +7,22 @@ import {
   type ChatInputCommandInteraction,
   type AutocompleteInteraction,
 } from 'discord.js';
-import { discordConfig, PROJECT_AGENTS_ENABLED } from './config.js';
+import path from 'path';
+
+import { discordConfig, PROJECT_AGENTS_ENABLED, CMUX_ENABLED, SUBAGENT_ENABLED, expandHome, PROJECT_ROOT, VAULT_PROJECTS_ROOT } from './config.js';
 import { clearSession, listMemories, forgetMemory } from './session-ops.js';
 import { logger } from './logger.js';
-import { rebuildRegistry } from './agent-registry.js';
+import { rebuildRegistry, getRegistryEntries, getRegistryEntry } from './agent-registry.js';
 import { bootstrapDiscordChannelMap } from './discord-bootstrap.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { lookupAgentForChannel } from './discord-channel-map.js';
 import { runCmuxCommand } from './cmux-command.js';
 import { AGENT_ID } from './config.js';
+import { clearPmCockpits, ensurePmCockpit, setPmCockpit } from './pm-cockpit.js';
+import { spawnSubagent } from './subagent-spawn.js';
+import { getByThreadId, updateStatus } from './subagent-sessions.js';
+import { listOpenIssues } from './gh-issue.js';
+import { sendProjectLog } from './project-logs.js';
 
 const log = logger.child({ name: 'discord-commands' });
 
@@ -60,6 +67,21 @@ export const slashCommands = [
         .setDescription('Prompt to send, or "status" / "new" / "read" / empty for status')
         .setRequired(false),
     ),
+  new SlashCommandBuilder()
+    .setName('issues')
+    .setDescription('List open GitHub issues for this project'),
+  new SlashCommandBuilder()
+    .setName('work')
+    .setDescription('Spawn a fresh-context subagent for the given GitHub issue')
+    .addIntegerOption((o) =>
+      o.setName('number').setDescription('GitHub issue number').setRequired(true),
+    ),
+  new SlashCommandBuilder()
+    .setName('work-done')
+    .setDescription('Mark this subagent\'s issue as complete and archive (invoke inside a subagent thread)'),
+  new SlashCommandBuilder()
+    .setName('work-cancel')
+    .setDescription('Abort this subagent and archive (invoke inside a subagent thread)'),
 ].map((c) => c.toJSON());
 
 export async function registerSlashCommands(clientId: string): Promise<void> {
@@ -110,6 +132,14 @@ export function wireSlashCommands(client: Client): void {
           return await onAsk(interaction);
         case 'cmux':
           return await onCmux(interaction);
+        case 'issues':
+          return await onIssues(interaction);
+        case 'work':
+          return await onWork(interaction);
+        case 'work-done':
+          return await onWorkDone(interaction);
+        case 'work-cancel':
+          return await onWorkCancel(interaction);
       }
     } catch (err) {
       log.error({ err, cmd: interaction.commandName }, 'slash command failed');
@@ -167,7 +197,30 @@ async function onReloadAgents(i: ChatInputCommandInteraction, client: Client): P
   try {
     rebuildRegistry();
     await bootstrapDiscordChannelMap(client);
-    await i.editReply('Agent registry rebuilt and Discord channel map refreshed.');
+
+    // Re-ensure PM cockpits for all manifest-sourced agents.
+    if (CMUX_ENABLED) {
+      clearPmCockpits();
+      const manifestEntries = getRegistryEntries().filter((e) => e.source === 'manifest');
+      for (const entry of manifestEntries) {
+        const workingDir = entry.manifest?.workingDir
+          ? expandHome(entry.manifest.workingDir)
+          : PROJECT_ROOT;
+        try {
+          const cockpit = await ensurePmCockpit(entry.id, workingDir);
+          if (cockpit) {
+            setPmCockpit(cockpit);
+            log.info({ agentId: entry.id, workspaceId: cockpit.workspaceId }, 'PM cockpit re-ensured on reload');
+          } else {
+            log.warn({ agentId: entry.id }, 'pm-cockpit: re-ensure returned null on reload');
+          }
+        } catch (err) {
+          log.warn({ agentId: entry.id, err }, 'pm-cockpit: error during reload re-ensure');
+        }
+      }
+    }
+
+    await i.editReply('Agent registry rebuilt, Discord channel map refreshed, PM cockpits re-ensured.');
   } catch (err) {
     log.error({ err }, 'reload-agents failed');
     await i.editReply('Reload failed — check logs for details.');
@@ -249,5 +302,191 @@ async function onCmux(i: ChatInputCommandInteraction): Promise<void> {
     await i.editReply('```\n' + capped + '\n```');
   } else {
     await i.editReply(result.reply ?? '(no response)');
+  }
+}
+
+// ── Subagent commands (RFC 5c) ────────────────────────────────────────────────
+
+async function onIssues(i: ChatInputCommandInteraction): Promise<void> {
+  if (!SUBAGENT_ENABLED) {
+    await i.reply({ content: 'SUBAGENT_ENABLED is false — subagent workflow is disabled.', ephemeral: true });
+    return;
+  }
+
+  await i.deferReply();
+
+  // Resolve the agent mapped to this channel.
+  const isThread = i.channel?.isThread?.() === true;
+  const routingChannelId =
+    isThread && (i.channel as { parentId?: string } | null)?.parentId
+      ? (i.channel as { parentId: string }).parentId
+      : i.channelId;
+  const agentId = lookupAgentForChannel(routingChannelId);
+  if (!agentId) {
+    await i.editReply('No project agent mapped to this channel.');
+    return;
+  }
+
+  const entry = getRegistryEntry(agentId);
+  const repo = entry?.manifest?.github?.repo;
+  if (!repo) {
+    await i.editReply('No github.repo in the project manifest.');
+    return;
+  }
+
+  try {
+    const issues = await listOpenIssues(repo, 10);
+    if (issues.length === 0) {
+      await i.editReply(`No open issues found in \`${repo}\`.`);
+      return;
+    }
+    const lines = issues.map((iss) => `#${iss.number} — ${iss.title} (${iss.state})`);
+    const content = lines.join('\n').slice(0, 1900);
+    await i.editReply(content);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await i.editReply(`Failed to list issues: ${msg}`.slice(0, 1900));
+  }
+}
+
+async function onWork(i: ChatInputCommandInteraction): Promise<void> {
+  if (!SUBAGENT_ENABLED) {
+    await i.reply({ content: 'SUBAGENT_ENABLED is false — subagent workflow is disabled.', ephemeral: true });
+    return;
+  }
+
+  const issueNumber = i.options.getInteger('number', true);
+  await i.deferReply();
+
+  // Resolve agent from channel mapping.
+  const isThread = i.channel?.isThread?.() === true;
+  const routingChannelId =
+    isThread && (i.channel as { parentId?: string } | null)?.parentId
+      ? (i.channel as { parentId: string }).parentId
+      : i.channelId;
+  const agentId = lookupAgentForChannel(routingChannelId);
+  if (!agentId) {
+    await i.editReply('No project agent mapped to this channel.');
+    return;
+  }
+
+  const entry = getRegistryEntry(agentId);
+  const repo = entry?.manifest?.github?.repo;
+  if (!repo) {
+    await i.editReply('No github.repo in the project manifest.');
+    return;
+  }
+
+  const project = entry!.manifest!.project;
+  const pmChannelId = routingChannelId;
+
+  // Resolve working dir from manifest.
+  const workingDir = entry?.manifest?.workingDir
+    ? expandHome(entry.manifest.workingDir)
+    : PROJECT_ROOT;
+
+  // Resolve vault project context path.
+  const vaultRoot = path.dirname(VAULT_PROJECTS_ROOT);
+  const contextCandidatePath = path.join(vaultRoot, '04-projects', project, 'context.md');
+  const { existsSync } = await import('fs');
+  const vaultProjectContextPath = existsSync(contextCandidatePath) ? contextCandidatePath : null;
+
+  try {
+    const result = await spawnSubagent({
+      project,
+      agentId,
+      issueNumber,
+      client: i.client,
+      pmChannelId,
+      repo,
+      workingDir,
+      vaultProjectContextPath,
+    });
+
+    const { session, thread } = result;
+    await sendProjectLog(
+      agentId,
+      'info',
+      `[subagent] spawned for #${issueNumber} "${session.issueTitle}" → thread ${thread.url}`,
+    );
+    await i.editReply(`Subagent spawned: ${thread.url}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error({ err, agentId, issueNumber }, 'onWork: spawnSubagent failed');
+    await i.editReply(`Failed to spawn subagent: ${msg}`.slice(0, 1900));
+  }
+}
+
+async function onWorkDone(i: ChatInputCommandInteraction): Promise<void> {
+  if (!SUBAGENT_ENABLED) {
+    await i.reply({ content: 'SUBAGENT_ENABLED is false — subagent workflow is disabled.', ephemeral: true });
+    return;
+  }
+
+  const session = getByThreadId(i.channelId);
+  if (!session || session.status !== 'running') {
+    await i.reply({
+      content: session
+        ? `This thread's subagent is already ${session.status} — cannot mark done.`
+        : 'This thread is not a tracked subagent thread.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const endedAt = Math.floor(Date.now() / 1000);
+  updateStatus(session.id, 'completed', endedAt);
+
+  await sendProjectLog(
+    session.agentId,
+    'info',
+    `[subagent] #${session.issueNumber} "${session.issueTitle}" completed — thread archived`,
+  );
+
+  await i.reply({ content: 'Marked complete. Archiving thread.' });
+
+  // Best-effort archive.
+  // TODO(5d): kill the cmux workspace when cmux.ts gains a closeWorkspace primitive.
+  try {
+    await (i.channel as { setArchived?: (v: boolean) => Promise<unknown> }).setArchived?.(true);
+  } catch {
+    // best-effort: thread may not support archival in the current context
+  }
+}
+
+async function onWorkCancel(i: ChatInputCommandInteraction): Promise<void> {
+  if (!SUBAGENT_ENABLED) {
+    await i.reply({ content: 'SUBAGENT_ENABLED is false — subagent workflow is disabled.', ephemeral: true });
+    return;
+  }
+
+  const session = getByThreadId(i.channelId);
+  if (!session || session.status !== 'running') {
+    await i.reply({
+      content: session
+        ? `This thread's subagent is already ${session.status} — cannot cancel.`
+        : 'This thread is not a tracked subagent thread.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const endedAt = Math.floor(Date.now() / 1000);
+  updateStatus(session.id, 'aborted', endedAt);
+
+  await sendProjectLog(
+    session.agentId,
+    'warn',
+    `[subagent] #${session.issueNumber} "${session.issueTitle}" aborted by user`,
+  );
+
+  await i.reply({ content: 'Cancelled and archiving.' });
+
+  // Best-effort archive.
+  // TODO(5d): kill the cmux workspace when cmux.ts gains a closeWorkspace primitive.
+  try {
+    await (i.channel as { setArchived?: (v: boolean) => Promise<unknown> }).setArchived?.(true);
+  } catch {
+    // best-effort
   }
 }
