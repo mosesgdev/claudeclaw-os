@@ -2,6 +2,9 @@
   "migrations": {
     "0.1.0": [
       "add-discord-channel-agent-map"
+    ],
+    "0.1.1": [
+      "add-memory-vault-links"
     ]
   }
 }

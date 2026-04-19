@@ -67,6 +67,11 @@ export function decryptField(ciphertext: string): string {
 
 let db: Database.Database;
 
+/** Return the underlying better-sqlite3 instance after initDatabase() has been called. */
+export function getDb(): Database.Database {
+  return db;
+}
+
 function createSchema(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS scheduled_tasks (
@@ -356,7 +361,7 @@ function createSchema(database: Database.Database): void {
       created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
     );
 
-    -- RFC: Project Agents Phase 1c — Discord channel→agent routing table
+    -- RFC 1 Phase 1c — Discord channel→agent routing table
     CREATE TABLE IF NOT EXISTS discord_channel_agent_map (
       channel_id    TEXT PRIMARY KEY,
       guild_id      TEXT NOT NULL,
@@ -368,6 +373,14 @@ function createSchema(database: Database.Database): void {
       updated_at    INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_dcam_agent ON discord_channel_agent_map(agent_id);
+
+    -- RFC 2a — Memory-to-vault-file link table (keeps memories schema lean)
+    CREATE TABLE IF NOT EXISTS memory_vault_links (
+      memory_id  INTEGER PRIMARY KEY,
+      vault_path TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_mvl_path ON memory_vault_links(vault_path);
   `);
 }
 
