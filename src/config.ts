@@ -37,6 +37,10 @@ const envConfig = readEnvFile([
   'WARROOM_ENABLED',
   'WARROOM_PORT',
   'STREAM_STRATEGY',
+  'DISCORD_BOT_TOKEN',
+  'DISCORD_GUILD_ID',
+  'DISCORD_ALLOWED_CHANNEL_IDS',
+  'DISCORD_MAX_LENGTH',
 ]);
 
 // ── Multi-agent support ──────────────────────────────────────────────
@@ -241,7 +245,7 @@ export const EXFILTRATION_GUARD_ENABLED =
   (process.env.EXFILTRATION_GUARD_ENABLED || envConfig.EXFILTRATION_GUARD_ENABLED || 'true').toLowerCase() === 'true';
 export const PROTECTED_ENV_VARS = (
   process.env.PROTECTED_ENV_VARS || envConfig.PROTECTED_ENV_VARS ||
-  'ANTHROPIC_API_KEY,CLAUDE_CODE_OAUTH_TOKEN,DB_ENCRYPTION_KEY,TELEGRAM_BOT_TOKEN,SLACK_USER_TOKEN,GROQ_API_KEY,ELEVENLABS_API_KEY,GOOGLE_API_KEY'
+  'ANTHROPIC_API_KEY,CLAUDE_CODE_OAUTH_TOKEN,DB_ENCRYPTION_KEY,TELEGRAM_BOT_TOKEN,SLACK_USER_TOKEN,GROQ_API_KEY,ELEVENLABS_API_KEY,GOOGLE_API_KEY,DISCORD_BOT_TOKEN'
 ).split(',').map((s) => s.trim()).filter(Boolean);
 
 // ── War Room (voice meeting via Pipecat WebSocket) ──────────────────
@@ -251,4 +255,24 @@ export const WARROOM_PORT = parseInt(
   process.env.WARROOM_PORT || envConfig.WARROOM_PORT || '7860',
   10,
 );
+
+// ── Discord Gateway ──────────────────────────────────────────────────
+export const discordConfig = {
+  botToken: process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN || '',
+  guildId: process.env.DISCORD_GUILD_ID || envConfig.DISCORD_GUILD_ID || '',
+  allowedChannelIds: (
+    process.env.DISCORD_ALLOWED_CHANNEL_IDS ||
+    envConfig.DISCORD_ALLOWED_CHANNEL_IDS ||
+    ''
+  )
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+  maxLength: Number(
+    process.env.DISCORD_MAX_LENGTH || envConfig.DISCORD_MAX_LENGTH || '2000',
+  ),
+  enabled: Boolean(
+    process.env.DISCORD_BOT_TOKEN || envConfig.DISCORD_BOT_TOKEN,
+  ),
+};
 
