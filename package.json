@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "env -u CLAUDECODE CMUX_CLAUDE_HOOKS_DISABLED=1 tsx src/index.ts",
+    "dev": "set -a && . ./.env && set +a && env -u CLAUDECODE CMUX_CLAUDE_HOOKS_DISABLED=1 tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
