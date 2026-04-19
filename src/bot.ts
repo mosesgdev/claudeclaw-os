@@ -7,6 +7,8 @@ import { TelegramChannel } from './channels/telegram.js';
 
 import { runAgent, runAgentWithRetry, UsageInfo, AgentProgressEvent } from './agent.js';
 import { AgentError } from './errors.js';
+import type { AgentContext } from './agent-context.js';
+import { getDefaultAgentContext } from './agent-context.js';
 import {
   AGENT_ID,
   ALLOWED_CHAT_ID,
@@ -375,7 +377,27 @@ async function replyIfLocked(ctx: Context): Promise<boolean> {
  * @param forceVoiceReply  When true, always respond with audio (e.g. user sent a voice note).
  * @param skipLog  When true, skip logging this turn to conversation_log (used by /respin to avoid self-referential logging).
  */
-export async function handleMessage(channel: MessageChannel, inbound: InboundMessage, forceVoiceReply = false, skipLog = false): Promise<void> {
+export async function handleMessage(channel: MessageChannel, inbound: InboundMessage, forceVoiceReply = false, skipLog = false, ctx?: AgentContext): Promise<void> {
+  // Resolve agent context: explicit arg > module-level default.
+  // All reads of agentId, systemPrompt, mcpServers, model inside this function
+  // use `agentCtx` so that per-message routing (phase 1e) works automatically.
+  let agentCtx: AgentContext;
+  try {
+    agentCtx = ctx ?? getDefaultAgentContext();
+  } catch {
+    // getDefaultAgentContext throws only if setAgentOverrides was never called
+    // (i.e. in unit test environments that don't initialise config). Fall back
+    // to reading the legacy module-level globals directly.
+    agentCtx = {
+      agentId: AGENT_ID,
+      name: AGENT_ID,
+      source: 'yaml' as const,
+      cwd: '',
+      model: agentDefaultModel,
+      mcpServers: agentMcpAllowlist,
+      systemPrompt: agentSystemPrompt,
+    };
+  }
   const message = inbound.text;
   const isTelegram = inbound.chatKey.startsWith('telegram:');
   const chatIdStr = inbound.chatKey.replace(/^telegram:/, '');
@@ -421,7 +443,7 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
 
   // ── Emergency kill check (runs even when locked) ────────────────
   if (checkKillPhrase(message)) {
-    audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'kill', detail: 'Emergency kill triggered', blocked: false });
+    audit({ agentId: agentCtx.agentId, chatId: chatIdStr, action: 'kill', detail: 'Emergency kill triggered', blocked: false });
     await channel.send('EMERGENCY KILL activated. All agents stopping.');
     executeEmergencyKill();
     return;
@@ -431,12 +453,12 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
   if (isLocked()) {
     // Try to unlock with the message as a PIN
     if (unlock(message)) {
-      audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'unlock', detail: 'PIN accepted', blocked: false });
+      audit({ agentId: agentCtx.agentId, chatId: chatIdStr, action: 'unlock', detail: 'PIN accepted', blocked: false });
       await channel.send('Unlocked. Session active.');
       return;
     }
     // Wrong PIN or not a PIN
-    audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'blocked', detail: 'Session locked, message rejected', blocked: true });
+    audit({ agentId: agentCtx.agentId, chatId: chatIdStr, action: 'blocked', detail: 'Session locked, message rejected', blocked: true });
     await channel.send('Session locked. Send your PIN to unlock.');
     return;
   }
@@ -445,7 +467,7 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
   touchActivity();
 
   // Audit the incoming message
-  audit({ agentId: AGENT_ID, chatId: chatIdStr, action: 'message', detail: message.slice(0, 200), blocked: false });
+  audit({ agentId: agentCtx.agentId, chatId: chatIdStr, action: 'message', detail: message.slice(0, 200), blocked: false });
 
   logger.info(
     { chatId, messageLen: message.length },
@@ -466,7 +488,7 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
         delegation.agentId,
         delegation.prompt,
         chatIdStr,
-        AGENT_ID,
+        agentCtx.agentId,
         (progressMsg) => {
           emitChatEvent({ type: 'progress', chatId: chatIdStr, description: progressMsg });
           void channel.send(progressMsg).catch(() => {});
@@ -497,17 +519,17 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
   }
 
   // Fetch session first: if resuming, the model already has the system prompt in context.
-  const sessionId = getSession(chatIdStr, AGENT_ID);
+  const sessionId = getSession(chatIdStr, agentCtx.agentId);
 
   // Build memory context and prepend to message
-  const { contextText: memCtx, surfacedMemoryIds, surfacedMemorySummaries } = await buildMemoryContext(chatIdStr, message, AGENT_ID);
+  const { contextText: memCtx, surfacedMemoryIds, surfacedMemorySummaries } = await buildMemoryContext(chatIdStr, message, agentCtx.agentId);
   const parts: string[] = [];
-  if (agentSystemPrompt && !sessionId) parts.push(`[Agent role — follow these instructions]\n${agentSystemPrompt}\n[End agent role]`);
+  if (agentCtx.systemPrompt && !sessionId) parts.push(`[Agent role — follow these instructions]\n${agentCtx.systemPrompt}\n[End agent role]`);
   if (memCtx) parts.push(memCtx);
 
   // Inject recent scheduled task outputs so the user can reply to them naturally.
   // Without this, Claude has no idea what a scheduled task just showed the user.
-  const recentTasks = getRecentTaskOutputs(AGENT_ID, 30);
+  const recentTasks = getRecentTaskOutputs(agentCtx.agentId, 30);
   if (recentTasks.length > 0) {
     const taskLines = recentTasks.map((t) => {
       const ago = Math.round((Date.now() / 1000 - t.last_run) / 60);
@@ -517,7 +539,7 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
   }
 
   // Memory nudge: remind the agent to persist knowledge if it's been a while
-  if (shouldNudgeMemory(chatIdStr, AGENT_ID)) {
+  if (shouldNudgeMemory(chatIdStr, agentCtx.agentId)) {
     parts.push(MEMORY_NUDGE_TEXT);
   }
 
@@ -525,7 +547,7 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
   const fullMessage = parts.join('\n\n');
 
   // Smart model routing: use cheap model for simple acknowledgments
-  const userModel = chatModelOverride.get(chatIdStr) ?? agentDefaultModel;
+  const userModel = chatModelOverride.get(chatIdStr) ?? agentCtx.model;
   const effectiveModel = (SMART_ROUTING_ENABLED && !userModel && classifyMessageComplexity(message) === 'simple')
     ? SMART_ROUTING_CHEAP_MODEL
     : (userModel ?? 'claude-opus-4-6');
@@ -625,7 +647,8 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
         void channel.send(`${error.recovery.userMessage} (retry ${attempt}/${2})`).catch(() => {});
       },
       MODEL_FALLBACK_CHAIN.length > 0 ? MODEL_FALLBACK_CHAIN : undefined,
-      agentMcpAllowlist,
+      agentCtx.mcpServers,
+      agentCtx,
     );
 
     clearTimeout(timeoutId);
@@ -649,7 +672,7 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
     }
 
     if (result.newSessionId) {
-      setSession(chatIdStr, result.newSessionId, AGENT_ID);
+      setSession(chatIdStr, result.newSessionId, agentCtx.agentId);
       logger.info({ newSessionId: result.newSessionId }, 'Session saved');
     }
 
@@ -679,7 +702,7 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
     // Save conversation turn to memory (including full log).
     // Skip logging for synthetic messages like /respin to avoid self-referential growth.
     if (!skipLog) {
-      saveConversationTurn(chatIdStr, message, rawResponse, result.newSessionId ?? sessionId, AGENT_ID);
+      saveConversationTurn(chatIdStr, message, rawResponse, result.newSessionId ?? sessionId, agentCtx.agentId);
       // Fire-and-forget: evaluate which surfaced memories were useful
       if (surfacedMemoryIds.length > 0) {
         void evaluateMemoryRelevance(surfacedMemoryIds, surfacedMemorySummaries, message, rawResponse).catch(() => {});
@@ -756,7 +779,7 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
           result.usage.lastCallCacheRead + result.usage.lastCallInputTokens,
           result.usage.totalCostUsd,
           result.usage.didCompact,
-          AGENT_ID,
+          agentCtx.agentId,
         );
       } catch (dbErr) {
         logger.error({ err: dbErr }, 'Failed to save token usage');
@@ -1719,18 +1742,26 @@ async function processDashboardMessage(
   text: string,
   chatIdStr: string,
 ): Promise<void> {
+  // Dashboard always runs under the default context (single-agent path).
+  let dashCtx: AgentContext;
+  try {
+    dashCtx = getDefaultAgentContext();
+  } catch {
+    dashCtx = { agentId: AGENT_ID, name: AGENT_ID, source: 'yaml', cwd: '', model: agentDefaultModel, mcpServers: agentMcpAllowlist, systemPrompt: agentSystemPrompt };
+  }
+
   emitChatEvent({ type: 'user_message', chatId: chatIdStr, content: text, source: 'dashboard' });
   setProcessing(chatIdStr, true);
 
   try {
-    const sessionId = getSession(chatIdStr, AGENT_ID);
+    const sessionId = getSession(chatIdStr, dashCtx.agentId);
 
-    const { contextText: memCtx, surfacedMemoryIds: dashSurfacedIds, surfacedMemorySummaries: dashSummaries } = await buildMemoryContext(chatIdStr, text, AGENT_ID);
+    const { contextText: memCtx, surfacedMemoryIds: dashSurfacedIds, surfacedMemorySummaries: dashSummaries } = await buildMemoryContext(chatIdStr, text, dashCtx.agentId);
     const dashParts: string[] = [];
-    if (agentSystemPrompt && !sessionId) dashParts.push(`[Agent role — follow these instructions]\n${agentSystemPrompt}\n[End agent role]`);
+    if (dashCtx.systemPrompt && !sessionId) dashParts.push(`[Agent role — follow these instructions]\n${dashCtx.systemPrompt}\n[End agent role]`);
     if (memCtx) dashParts.push(memCtx);
 
-    const recentDashTasks = getRecentTaskOutputs(AGENT_ID, 30);
+    const recentDashTasks = getRecentTaskOutputs(dashCtx.agentId, 30);
     if (recentDashTasks.length > 0) {
       const taskLines = recentDashTasks.map((t) => {
         const ago = Math.round((Date.now() / 1000 - t.last_run) / 60);
@@ -1758,10 +1789,11 @@ async function processDashboardMessage(
       sessionId,
       () => {}, // no typing action for dashboard
       onProgress,
-      agentDefaultModel,
+      dashCtx.model,
       abortCtrl,
       undefined, // no streaming for dashboard
-      agentMcpAllowlist,
+      dashCtx.mcpServers,
+      dashCtx,
     );
 
     clearTimeout(dashTimeout);
@@ -1777,13 +1809,13 @@ async function processDashboardMessage(
     }
 
     if (result.newSessionId) {
-      setSession(chatIdStr, result.newSessionId, AGENT_ID);
+      setSession(chatIdStr, result.newSessionId, dashCtx.agentId);
     }
 
     const rawResponse = result.text?.trim() || 'Done.';
 
     // Save conversation turn
-    saveConversationTurn(chatIdStr, text, rawResponse, result.newSessionId ?? sessionId, AGENT_ID);
+    saveConversationTurn(chatIdStr, text, rawResponse, result.newSessionId ?? sessionId, dashCtx.agentId);
     if (dashSurfacedIds.length > 0) {
       void evaluateMemoryRelevance(dashSurfacedIds, dashSummaries, text, rawResponse).catch(() => {});
     }
@@ -1812,7 +1844,7 @@ async function processDashboardMessage(
           result.usage.lastCallCacheRead + result.usage.lastCallInputTokens,
           result.usage.totalCostUsd,
           result.usage.didCompact,
-          AGENT_ID,
+          dashCtx.agentId,
         );
       } catch (dbErr) {
         logger.error({ err: dbErr }, 'Failed to save token usage');

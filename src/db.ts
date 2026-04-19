@@ -355,6 +355,19 @@ function createSchema(database: Database.Database): void {
       total_cost  REAL NOT NULL DEFAULT 0,
       created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
     );
+
+    -- RFC: Project Agents Phase 1c — Discord channel→agent routing table
+    CREATE TABLE IF NOT EXISTS discord_channel_agent_map (
+      channel_id    TEXT PRIMARY KEY,
+      guild_id      TEXT NOT NULL,
+      agent_id      TEXT NOT NULL,
+      project       TEXT,
+      category_name TEXT,
+      channel_name  TEXT,
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_dcam_agent ON discord_channel_agent_map(agent_id);
   `);
 }
 
@@ -630,6 +643,15 @@ export function _initTestDatabase(): void {
   db.pragma('journal_mode = WAL');
   createSchema(db);
   runMigrations(db);
+}
+
+/**
+ * Return the active database instance.
+ * Modules outside db.ts that need direct prepared-statement access
+ * (e.g. discord-channel-map.ts) use this instead of re-opening the file.
+ */
+export function getDb(): Database.Database {
+  return db;
 }
 
 export function getSession(chatId: string, agentId = 'main'): string | undefined {

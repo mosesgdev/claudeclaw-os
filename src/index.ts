@@ -1,9 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 
+import { Events } from 'discord.js';
+
 import { loadAgentConfig, listAgentIds, resolveAgentDir, resolveAgentClaudeMd } from './agent-config.js';
 import { createBot } from './bot.js';
 import { createDiscordBot } from './discord-bot.js';
+import { bootstrapDiscordChannelMap } from './discord-bootstrap.js';
 import { checkPendingMigrations } from './migrations.js';
 import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, SECURITY_PIN_HASH, IDLE_LOCK_MINUTES, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, discordConfig } from './config.js';
 import { startDashboard } from './dashboard.js';
@@ -38,7 +41,7 @@ if (AGENT_ID !== 'main') {
   }
   setAgentOverrides({
     agentId: AGENT_ID,
-    botToken: agentConfig.botToken,
+    botToken: agentConfig.botToken ?? '',
     cwd: agentDir,
     model: agentConfig.model,
     obsidian: agentConfig.obsidian,
@@ -414,6 +417,17 @@ async function main(): Promise<void> {
         try {
           await discordClient.login(discordConfig.botToken);
           logger.info('Discord login complete');
+          // Wait for the client ready event before bootstrapping channel maps.
+          // discord-bot.ts fires ClientReady on the client; we await it here
+          // so the guild/channel fetch in bootstrapDiscordChannelMap succeeds.
+          await new Promise<void>((resolve) => {
+            if (discordClient.isReady()) {
+              resolve();
+            } else {
+              discordClient.once(Events.ClientReady, () => resolve());
+            }
+          });
+          await bootstrapDiscordChannelMap(discordClient);
         } catch (err) {
           // Never let a Discord credential or transient Discord outage take
           // down the daemon — Telegram is the primary transport.

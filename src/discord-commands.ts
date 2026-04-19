@@ -6,9 +6,11 @@ import {
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
 } from 'discord.js';
-import { discordConfig } from './config.js';
+import { discordConfig, PROJECT_AGENTS_ENABLED } from './config.js';
 import { clearSession, listMemories, forgetMemory } from './session-ops.js';
 import { logger } from './logger.js';
+import { rebuildRegistry } from './agent-registry.js';
+import { bootstrapDiscordChannelMap } from './discord-bootstrap.js';
 
 const log = logger.child({ name: 'discord-commands' });
 
@@ -25,6 +27,9 @@ export const slashCommands = [
     .addStringOption((o) =>
       o.setName('id').setDescription('Memory id').setRequired(true),
     ),
+  new SlashCommandBuilder()
+    .setName('reload-agents')
+    .setDescription('Rescan project manifests and re-map Discord channels (requires PROJECT_AGENTS_ENABLED)'),
 ].map((c) => c.toJSON());
 
 export async function registerSlashCommands(clientId: string): Promise<void> {
@@ -63,6 +68,8 @@ export function wireSlashCommands(client: Client): void {
           return await onMemory(interaction);
         case 'forget':
           return await onForget(interaction);
+        case 'reload-agents':
+          return await onReloadAgents(interaction, interaction.client);
       }
     } catch (err) {
       log.error({ err, cmd: interaction.commandName }, 'slash command failed');
@@ -109,4 +116,20 @@ async function onForget(i: ChatInputCommandInteraction): Promise<void> {
       ? `forgot memory \`${id}\``
       : `no memory with id \`${id}\``,
   });
+}
+
+async function onReloadAgents(i: ChatInputCommandInteraction, client: Client): Promise<void> {
+  if (!PROJECT_AGENTS_ENABLED) {
+    await i.reply({ content: 'PROJECT_AGENTS_ENABLED is false — nothing to reload', ephemeral: true });
+    return;
+  }
+  await i.deferReply({ ephemeral: true });
+  try {
+    rebuildRegistry();
+    await bootstrapDiscordChannelMap(client);
+    await i.editReply('Agent registry rebuilt and Discord channel map refreshed.');
+  } catch (err) {
+    log.error({ err }, 'reload-agents failed');
+    await i.editReply('Reload failed — check logs for details.');
+  }
 }

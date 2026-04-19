@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { readEnvFile } from './env.js';
+import { setDefaultAgentContext } from './agent-context.js';
 
 const envConfig = readEnvFile([
   'TELEGRAM_BOT_TOKEN',
@@ -41,6 +42,8 @@ const envConfig = readEnvFile([
   'DISCORD_GUILD_ID',
   'DISCORD_ALLOWED_CHANNEL_IDS',
   'DISCORD_MAX_LENGTH',
+  'VAULT_PROJECTS_ROOT',
+  'PROJECT_AGENTS_ENABLED',
 ]);
 
 // ── Multi-agent support ──────────────────────────────────────────────
@@ -53,6 +56,18 @@ export let agentDefaultModel: string | undefined; // from agent.yaml
 export let agentObsidianConfig: { vault: string; folders: string[]; readOnly?: string[] } | undefined;
 export let agentSystemPrompt: string | undefined; // loaded from agents/{id}/CLAUDE.md
 export let agentMcpAllowlist: string[] | undefined; // from agent.yaml mcp_servers
+
+// Bootstrap a default AgentContext from the startup values so any code path
+// that calls getDefaultAgentContext() before setAgentOverrides() (e.g. in
+// tests) gets a sensible value rather than throwing.
+// setAgentOverrides() will overwrite this with the fully-resolved config.
+setDefaultAgentContext({
+  agentId: 'main',
+  name: 'main',
+  source: 'yaml',
+  botToken: process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || undefined,
+  cwd: '', // will be set to PROJECT_ROOT once available; setAgentOverrides overwrites
+});
 
 export function setAgentOverrides(opts: {
   agentId: string;
@@ -70,6 +85,21 @@ export function setAgentOverrides(opts: {
   agentObsidianConfig = opts.obsidian;
   agentSystemPrompt = opts.systemPrompt;
   agentMcpAllowlist = opts.mcpServers;
+
+  // Build and stash an AgentContext so code paths that receive ctx as a
+  // parameter have a consistent source of truth. The named exports above
+  // remain the authoritative values for callers that import them directly.
+  setDefaultAgentContext({
+    agentId: opts.agentId,
+    name: opts.agentId, // best guess; index.ts has the real name from agent.yaml
+    source: 'yaml',
+    botToken: opts.botToken || undefined,
+    cwd: opts.cwd,
+    model: opts.model,
+    mcpServers: opts.mcpServers,
+    obsidian: opts.obsidian,
+    systemPrompt: opts.systemPrompt,
+  });
 }
 
 export const TELEGRAM_BOT_TOKEN =
@@ -255,6 +285,28 @@ export const WARROOM_PORT = parseInt(
   process.env.WARROOM_PORT || envConfig.WARROOM_PORT || '7860',
   10,
 );
+
+// ── Project agents ───────────────────────────────────────────────────
+// Root directory that contains per-project Obsidian folders, each with
+// a context.md manifest. Defaults to the ClaudeClaw projects folder.
+const rawVaultProjectsRoot =
+  process.env.VAULT_PROJECTS_ROOT ||
+  envConfig.VAULT_PROJECTS_ROOT ||
+  '~/Documents/Obsidian/ClaudeClaw/04-projects';
+
+/**
+ * Absolute path to the vault's 04-projects directory.
+ * Defaults to ~/Documents/Obsidian/ClaudeClaw/04-projects.
+ * Override via VAULT_PROJECTS_ROOT in .env or environment.
+ */
+export const VAULT_PROJECTS_ROOT = expandHome(rawVaultProjectsRoot);
+
+/**
+ * Enable project-agent routing (manifest-sourced agents + Discord channel map).
+ * Defaults to false during rollout. Flip to true after phase 1e validation.
+ */
+export const PROJECT_AGENTS_ENABLED =
+  (process.env.PROJECT_AGENTS_ENABLED || envConfig.PROJECT_AGENTS_ENABLED || 'false').toLowerCase() === 'true';
 
 // ── Discord Gateway ──────────────────────────────────────────────────
 export const discordConfig = {

@@ -8,8 +8,8 @@ import { readEnvFile } from './env.js';
 export interface AgentConfig {
   name: string;
   description: string;
-  botTokenEnv: string;
-  botToken: string;
+  botTokenEnv?: string;
+  botToken?: string;
   model?: string;
   mcpServers?: string[];
   obsidian?: {
@@ -65,17 +65,21 @@ export function loadAgentConfig(agentId: string): AgentConfig {
 
   const name = raw['name'] as string;
   const description = (raw['description'] as string) ?? '';
-  const botTokenEnv = raw['telegram_bot_token_env'] as string;
+  const botTokenEnv = raw['telegram_bot_token_env'] as string | undefined;
   const model = raw['model'] as string | undefined;
 
-  if (!name || !botTokenEnv) {
-    throw new Error(`Agent config ${configPath} must have 'name' and 'telegram_bot_token_env'`);
+  if (!name) {
+    throw new Error(`Agent config ${configPath} must have 'name'`);
   }
 
-  const env = readEnvFile([botTokenEnv]);
-  const botToken = process.env[botTokenEnv] || env[botTokenEnv] || '';
-  if (!botToken) {
-    throw new Error(`Bot token not found: set ${botTokenEnv} in .env`);
+  let botToken: string | undefined;
+  if (botTokenEnv) {
+    const env = readEnvFile([botTokenEnv]);
+    const resolved = process.env[botTokenEnv] || env[botTokenEnv] || '';
+    if (!resolved) {
+      throw new Error(`Bot token not found: set ${botTokenEnv} in .env`);
+    }
+    botToken = resolved;
   }
 
   let obsidian: AgentConfig['obsidian'];
