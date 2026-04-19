@@ -177,7 +177,10 @@ async function main(): Promise<void> {
   cleanupOldUploads();
 
   const bot = createBot();
-  const discordClient = createDiscordBot();
+  // Discord gateway: only the main agent opens the WebSocket — Discord enforces
+  // one connection per token, so giving sub-agents their own clients would make
+  // them fight for and disconnect each other.
+  const discordClient = AGENT_ID === 'main' ? createDiscordBot() : null;
 
   // Dashboard only runs in the main bot process
   if (AGENT_ID === 'main') {
@@ -386,8 +389,14 @@ async function main(): Promise<void> {
         console.log(`\n  ClaudeClaw agent [${AGENT_ID}] online: @${botInfo.username}\n`);
       }
       if (discordClient) {
-        await discordClient.login(discordConfig.botToken);
-        logger.info('Discord login complete');
+        try {
+          await discordClient.login(discordConfig.botToken);
+          logger.info('Discord login complete');
+        } catch (err) {
+          // Never let a Discord credential or transient Discord outage take
+          // down the daemon — Telegram is the primary transport.
+          logger.error({ err }, 'Discord login failed — continuing Telegram-only');
+        }
       }
     },
   });
