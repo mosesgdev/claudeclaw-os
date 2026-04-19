@@ -75,7 +75,7 @@ describe('makeVaultMirrorCallback', () => {
     expect(mockSpawn).not.toHaveBeenCalled();
     expect(mockLogger.warn).toHaveBeenCalledWith(
       { cliPath: VALID_CONFIG.cliPath },
-      'Vault mirror enabled but bridge CLI is missing — is the project built?',
+      'Vault bridge enabled but CLI missing (memory-mirror) — is the project built?',
     );
   });
 
@@ -132,8 +132,8 @@ describe('makeVaultMirrorCallback', () => {
     const cb = makeVaultMirrorCallback(true, VALID_CONFIG);
     expect(() => cb!(1, 'summary', 0.75, [])).not.toThrow();
     expect(mockLogger.warn).toHaveBeenCalledWith(
-      { err: expect.any(Error) },
-      'Failed to spawn vault-bridge-cli for memory mirror',
+      { err: expect.any(Error), context: 'memory-mirror' },
+      'Failed to spawn vault-bridge-cli',
     );
   });
 });

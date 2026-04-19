@@ -7,6 +7,24 @@ import {
 import { embedText } from './embeddings.js';
 import { logger } from './logger.js';
 
+/** Callback type for consolidation mirror (RFC 2f). */
+export type ConsolidationMirrorCallback = (
+  insight: string,
+  summary: string,
+  importance: number,
+  topics: string[],
+) => void;
+
+let _consolidationMirror: ConsolidationMirrorCallback | null = null;
+
+/**
+ * Register a callback to be fired after each successful consolidation
+ * with importance >= 0.7. Fire-and-forget — callback must not throw.
+ */
+export function setConsolidationMirror(cb: ConsolidationMirrorCallback | null): void {
+  _consolidationMirror = cb;
+}
+
 interface ConsolidationResult {
   summary: string;
   insight: string;
@@ -153,6 +171,22 @@ export async function runConsolidation(chatId: string): Promise<void> {
       }
     } catch (embErr) {
       logger.warn({ err: embErr, consolidationId }, 'Failed to embed consolidation');
+    }
+
+    // Fire consolidation mirror for vault write (RFC 2f).
+    // Importance = average of source memories; topics = union of all memory topics.
+    if (_consolidationMirror) {
+      try {
+        const avgImportance =
+          memoriesJson.reduce((sum, m) => sum + m.importance, 0) / memoriesJson.length;
+        const topicSet = new Set<string>(
+          memoriesJson.flatMap((m) => m.topics as string[]),
+        );
+        const topics = [...topicSet].slice(0, 10);
+        _consolidationMirror(result.insight, result.summary, avgImportance, topics);
+      } catch (mirrorErr) {
+        logger.warn({ err: mirrorErr }, 'Consolidation mirror callback threw — ignoring');
+      }
     }
 
     logger.info(

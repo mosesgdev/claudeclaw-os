@@ -1,8 +1,12 @@
 /**
- * vault-mirror.ts — RFC 2e
+ * vault-mirror.ts — RFC 2e / 2f
  *
- * Factory that builds the memory-mirror callback registered via setMirrorCallback().
- * Extracted from bot.ts so it can be unit-tested without starting the full bot.
+ * Factories that build fire-and-forget callbacks for:
+ *   - Memory mirror (RFC 2e): makeVaultMirrorCallback
+ *   - Consolidation mirror (RFC 2f): makeConsolidationMirror
+ *
+ * Both share spawnVaultBridge() — a single helper that detaches a vault-bridge-cli
+ * child process and unrefs it so it never blocks the parent.
  */
 
 import fs from 'fs';
@@ -23,6 +27,33 @@ export interface VaultMirrorConfig {
 }
 
 /**
+ * Shared spawn helper. Fires vault-bridge-cli with the given args in a detached,
+ * unref'd child process. Never throws — logs a warning on spawn failure.
+ */
+function spawnVaultBridge(
+  cliPath: string,
+  projectRoot: string,
+  args: string[],
+  context: string,
+): void {
+  if (!fs.existsSync(cliPath)) {
+    logger.warn({ cliPath }, `Vault bridge enabled but CLI missing (${context}) — is the project built?`);
+    return;
+  }
+
+  try {
+    const child = spawn('node', [cliPath, ...args], {
+      detached: true,
+      stdio: 'ignore',
+      cwd: projectRoot,
+    });
+    child.unref();
+  } catch (err) {
+    logger.warn({ err, context }, 'Failed to spawn vault-bridge-cli');
+  }
+}
+
+/**
  * Build a fire-and-forget callback that spawns vault-bridge-cli for each mirrored memory.
  * Returns null when OBSIDIAN_WRITE_ENABLED is false so the caller can skip registration.
  */
@@ -40,13 +71,8 @@ export function makeVaultMirrorCallback(
 
     const { cliPath, projectRoot, agentId, vaultRoot } = config;
 
-    if (!fs.existsSync(cliPath)) {
-      logger.warn({ cliPath }, 'Vault mirror enabled but bridge CLI is missing — is the project built?');
-      return;
-    }
-
-    const args = [
-      cliPath, 'write',
+    spawnVaultBridge(cliPath, projectRoot, [
+      'write',
       '--type', 'learning',
       '--title', summary.slice(0, 80),
       '--content', summary,
@@ -57,17 +83,36 @@ export function makeVaultMirrorCallback(
       '--memory-id', String(memoryId),
       '--vault-root', vaultRoot,
       '--chat-id', 'vault-bridge',
-    ];
+    ], 'memory-mirror');
+  };
+}
 
-    try {
-      const child = spawn('node', args, {
-        detached: true,
-        stdio: 'ignore',
-        cwd: projectRoot,
-      });
-      child.unref();
-    } catch (err) {
-      logger.warn({ err }, 'Failed to spawn vault-bridge-cli for memory mirror');
-    }
+/**
+ * Build a fire-and-forget callback that spawns vault-bridge-cli for each consolidation insight.
+ * Fires for consolidations with importance >= 0.7.
+ * Returns null when OBSIDIAN_WRITE_ENABLED is false or no vault is configured.
+ */
+export function makeConsolidationMirror(
+  enabled: boolean,
+  config: VaultMirrorConfig | null,
+): ((insight: string, summary: string, importance: number, topics: string[]) => void) | null {
+  if (!enabled || !config) return null;
+
+  return (insight: string, summary: string, importance: number, topics: string[]) => {
+    if (importance < 0.7) return;
+
+    const { cliPath, projectRoot, vaultRoot } = config;
+
+    spawnVaultBridge(cliPath, projectRoot, [
+      'write',
+      '--type', 'reflection',
+      '--source', 'consolidation',
+      '--title', insight.slice(0, 80),
+      '--content', summary,
+      '--importance', String(importance),
+      '--topics', topics.join(','),
+      '--vault-root', vaultRoot,
+      '--chat-id', 'vault-bridge',
+    ], 'consolidation-mirror');
   };
 }

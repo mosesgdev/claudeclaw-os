@@ -46,7 +46,8 @@ import { scanForSecrets, redactSecrets } from './exfiltration-guard.js';
 import { trackUsage, getRateStatus } from './rate-tracker.js';
 import { buildCostFooter } from './cost-footer.js';
 import { setHighImportanceCallback, setMirrorCallback } from './memory-ingest.js';
-import { makeVaultMirrorCallback } from './vault-mirror.js';
+import { makeVaultMirrorCallback, makeConsolidationMirror } from './vault-mirror.js';
+import { setConsolidationMirror } from './memory-consolidate.js';
 import { messageQueue } from './message-queue.js';
 import { parseDelegation, delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { emitChatEvent, setProcessing, setActiveAbort, abortActiveQuery } from './state.js';
@@ -930,6 +931,11 @@ export function createBot(): Bot {
     if (mirrorCb) {
       setMirrorCallback(mirrorCb);
     }
+
+    // Register consolidation mirror callback (RFC 2f). Fires after each consolidation
+    // with average importance >= 0.7 to write reflections into the vault.
+    const consolidationMirrorCb = makeConsolidationMirror(OBSIDIAN_WRITE_ENABLED, mirrorConfig);
+    setConsolidationMirror(consolidationMirrorCb);
   }
 
   // Register commands in the Telegram menu (built-in + auto-discovered skills)
