@@ -6,17 +6,16 @@
   <string>com.claudeclaw.main</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/homebrew/bin/node</string>
-    <string>dist/index.js</string>
+    <string>/Users/moses/Services/claudeclaw/scripts/launchd-start.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>__PROJECT_DIR__</string>
+  <string>/Users/moses/Services/claudeclaw</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/Users/moses/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>HOME</key>
-    <string>__HOME__</string>
+    <string>/Users/moses</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -25,8 +24,10 @@
   <key>ThrottleInterval</key>
   <integer>30</integer>
   <key>StandardOutPath</key>
-  <string>__PROJECT_DIR__/logs/main.log</string>
+  <string>/tmp/claudeclaw-main.out.log</string>
   <key>StandardErrorPath</key>
-  <string>__PROJECT_DIR__/logs/main.log</string>
+  <string>/tmp/claudeclaw-main.err.log</string>
+  <key>ProcessType</key>
+  <string>Interactive</string>
 </dict>
 </plist>
