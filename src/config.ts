@@ -46,6 +46,7 @@ const envConfig = readEnvFile([
   'PROJECT_AGENTS_ENABLED',
   'AGENTIC_MASTER_ROOT',
   'OBSIDIAN_WRITE_ENABLED',
+  'CMUX_ENABLED',
 ]);
 
 // ── Multi-agent support ──────────────────────────────────────────────
@@ -321,6 +322,11 @@ export const AGENTIC_MASTER_ROOT = expandHome(
 // Gates the vault mirror hook (RFC 2). Default: false.
 export const OBSIDIAN_WRITE_ENABLED =
   (process.env.OBSIDIAN_WRITE_ENABLED || envConfig.OBSIDIAN_WRITE_ENABLED || 'false').toLowerCase() === 'true';
+
+// Gates the /cmux command (drives a per-chat cmux.app workspace running interactive claude).
+// Requires cmux.app installed at /Applications/cmux.app. Default: false.
+export const CMUX_ENABLED =
+  (process.env.CMUX_ENABLED || envConfig.CMUX_ENABLED || 'false').toLowerCase() === 'true';
 
 // ── Discord Gateway ──────────────────────────────────────────────────
 export const discordConfig = {

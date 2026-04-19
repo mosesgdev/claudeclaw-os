@@ -139,9 +139,9 @@ describe('slashCommands registration', () => {
     expect(promptOpt?.required).toBe(true);
   });
 
-  it('has exactly 5 registered commands', () => {
-    // newchat, memory, forget, reload-agents, ask
-    expect(slashCommands).toHaveLength(5);
+  it('has exactly 6 registered commands', () => {
+    // newchat, memory, forget, reload-agents, ask, cmux
+    expect(slashCommands).toHaveLength(6);
   });
 });
 
@@ -191,7 +191,7 @@ describe('wireSlashCommands — autocomplete', () => {
     const interaction = makeAutocompleteInteraction('');
     await handlers[0]!(interaction);
 
-    const calls = interaction.respond.mock.calls[0][0] as Array<{ name: string; value: string }>;
+    const calls = (interaction.respond.mock.calls[0] as unknown as [Array<{ name: string; value: string }>])[0];
     expect(calls.length).toBeLessThanOrEqual(25);
     expect(calls.map((c) => c.value)).toContain('main');
     expect(calls.map((c) => c.value)).toContain('research');
@@ -259,7 +259,7 @@ describe('wireSlashCommands — /ask command handler', () => {
     const interaction = makeAskInteraction({ agentId: 'ghost', prompt: 'hello?' });
     await invokeAsk(interaction);
 
-    const call = vi.mocked(interaction.editReply).mock.calls[0][0] as string;
+    const call = (vi.mocked(interaction.editReply).mock.calls[0] as unknown as [string])[0];
     expect(call).toContain('agent not found');
   });
 
@@ -365,7 +365,7 @@ describe('wireSlashCommands — /ask command handler', () => {
     const interaction = makeAskInteraction({ agentId: 'research', prompt: 'long?' });
     await invokeAsk(interaction);
 
-    const reply = vi.mocked(interaction.editReply).mock.calls[0][0] as string;
+    const reply = (vi.mocked(interaction.editReply).mock.calls[0] as unknown as [string])[0];
     expect(reply.length).toBeLessThanOrEqual(1903); // 1900 + '...'
     expect(reply.endsWith('...')).toBe(true);
   });
