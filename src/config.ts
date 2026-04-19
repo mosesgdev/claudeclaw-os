@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { readEnvFile } from './env.js';
+import { setDefaultAgentContext } from './agent-context.js';
 
 const envConfig = readEnvFile([
   'TELEGRAM_BOT_TOKEN',
@@ -55,6 +56,18 @@ export let agentObsidianConfig: { vault: string; folders: string[]; readOnly?: s
 export let agentSystemPrompt: string | undefined; // loaded from agents/{id}/CLAUDE.md
 export let agentMcpAllowlist: string[] | undefined; // from agent.yaml mcp_servers
 
+// Bootstrap a default AgentContext from the startup values so any code path
+// that calls getDefaultAgentContext() before setAgentOverrides() (e.g. in
+// tests) gets a sensible value rather than throwing.
+// setAgentOverrides() will overwrite this with the fully-resolved config.
+setDefaultAgentContext({
+  agentId: 'main',
+  name: 'main',
+  source: 'yaml',
+  botToken: process.env.TELEGRAM_BOT_TOKEN || envConfig.TELEGRAM_BOT_TOKEN || undefined,
+  cwd: '', // will be set to PROJECT_ROOT once available; setAgentOverrides overwrites
+});
+
 export function setAgentOverrides(opts: {
   agentId: string;
   botToken: string;
@@ -71,6 +84,21 @@ export function setAgentOverrides(opts: {
   agentObsidianConfig = opts.obsidian;
   agentSystemPrompt = opts.systemPrompt;
   agentMcpAllowlist = opts.mcpServers;
+
+  // Build and stash an AgentContext so code paths that receive ctx as a
+  // parameter have a consistent source of truth. The named exports above
+  // remain the authoritative values for callers that import them directly.
+  setDefaultAgentContext({
+    agentId: opts.agentId,
+    name: opts.agentId, // best guess; index.ts has the real name from agent.yaml
+    source: 'yaml',
+    botToken: opts.botToken || undefined,
+    cwd: opts.cwd,
+    model: opts.model,
+    mcpServers: opts.mcpServers,
+    obsidian: opts.obsidian,
+    systemPrompt: opts.systemPrompt,
+  });
 }
 
 export const TELEGRAM_BOT_TOKEN =

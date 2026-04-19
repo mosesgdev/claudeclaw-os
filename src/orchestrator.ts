@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { runAgent, UsageInfo } from './agent.js';
-import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd } from './agent-config.js';
+import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd, resolveAgentDir } from './agent-config.js';
+import { buildContextFromYaml } from './agent-context.js';
 import { PROJECT_ROOT } from './config.js';
 import { logToHiveMind, createInterAgentTask, completeInterAgentTask } from './db.js';
 import { logger } from './logger.js';
@@ -158,6 +159,7 @@ export async function delegateToAgent(
   try {
     // Load agent config to get its system prompt and MCP allowlist
     const agentConfig = loadAgentConfig(agentId);
+    const agentDir = resolveAgentDir(agentId);
     const claudeMdPath = resolveAgentClaudeMd(agentId);
     let systemPrompt = '';
     if (claudeMdPath) {
@@ -167,6 +169,10 @@ export async function delegateToAgent(
         // No CLAUDE.md for this agent — that's fine
       }
     }
+
+    // Build AgentContext from the loaded yaml so the sub-agent gets the right
+    // cwd, model, mcpServers, and systemPrompt without reading global state.
+    const subAgentCtx = buildContextFromYaml(agentId, agentConfig, agentDir, systemPrompt || undefined);
 
     // Build memory context for the delegated agent
     const { contextText: memCtx } = await buildMemoryContext(chatId, prompt, agentId);
@@ -192,10 +198,11 @@ export async function delegateToAgent(
         undefined, // fresh session for each delegation
         () => {}, // no typing indicator needed for sub-delegation
         undefined, // no progress callback for inner agent
-        undefined, // use default model
+        undefined, // use default model (ctx.model will be used by runAgent)
         abortCtrl,
         undefined, // no streaming for delegation
-        agentConfig.mcpServers,
+        undefined, // mcpAllowlist: ctx carries this via subAgentCtx
+        subAgentCtx,
       );
 
       clearTimeout(timer);

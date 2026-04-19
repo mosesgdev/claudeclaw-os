@@ -4,6 +4,7 @@ import path from 'path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
 import { AGENT_MAX_TURNS, PROJECT_ROOT, agentCwd } from './config.js';
+import type { AgentContext } from './agent-context.js';
 import { readEnvFile } from './env.js';
 import { classifyError, AgentError } from './errors.js';
 import { logger } from './logger.js';
@@ -179,6 +180,7 @@ export async function runAgent(
   abortController?: AbortController,
   onStreamText?: (accumulatedText: string) => void,
   mcpAllowlist?: string[],
+  ctx?: AgentContext,
 ): Promise<AgentResult> {
   // Read secrets from .env without polluting process.env.
   // CLAUDE_CODE_OAUTH_TOKEN is optional — the subprocess finds auth via ~/.claude/
@@ -207,8 +209,12 @@ export async function runAgent(
   const typingInterval = setInterval(onTyping, 4000);
 
   try {
+    // Resolve effective values: ctx takes priority over the legacy param / global.
+    const effectiveMcpAllowlist = ctx?.mcpServers ?? mcpAllowlist;
+    const effectiveCwd = ctx?.cwd || agentCwd || PROJECT_ROOT;
+
     // Load MCP servers from project + user settings files, filtered by agent allowlist
-    const mcpServers = loadMcpServers(mcpAllowlist);
+    const mcpServers = loadMcpServers(effectiveMcpAllowlist, effectiveCwd);
     const mcpServerNames = Object.keys(mcpServers);
     logger.info(
       { sessionId: sessionId ?? 'new', messageLen: message.length, mcpServers: mcpServerNames },
@@ -218,12 +224,15 @@ export async function runAgent(
     // SDK Options.mcpServers expects Record<string, McpServerConfig>
     const mcpServerSpecs = mcpServerNames.length > 0 ? mcpServers : undefined;
 
+    // Effective model: ctx overrides the explicit param, explicit param overrides undefined
+    const effectiveModel = ctx?.model ?? model;
+
     for await (const event of query({
       prompt: singleTurn(message),
       options: {
         // cwd = agent directory (if running as agent) or project root.
         // Claude Code loads CLAUDE.md from cwd via settingSources: ['project'].
-        cwd: agentCwd ?? PROJECT_ROOT,
+        cwd: effectiveCwd,
 
         // Resume the previous session for this chat (persistent context)
         resume: sessionId,
@@ -249,7 +258,7 @@ export async function runAgent(
         includePartialMessages: !!onStreamText,
 
         // Model override (e.g. 'claude-haiku-4-5', 'claude-sonnet-4-5')
-        ...(model ? { model } : {}),
+        ...(effectiveModel ? { model: effectiveModel } : {}),
 
         // Abort support — signals the SDK to kill the subprocess
         ...(abortController ? { abortController } : {}),
@@ -414,6 +423,7 @@ export async function runAgentWithRetry(
   onRetry?: (attempt: number, error: AgentError) => void,
   fallbackModels?: string[],
   mcpAllowlist?: string[],
+  ctx?: AgentContext,
 ): Promise<AgentResult> {
   let lastError: AgentError | undefined;
 
@@ -428,7 +438,7 @@ export async function runAgentWithRetry(
       return await runAgent(
         message, sessionId, onTyping, onProgress,
         currentModel, abortController, onStreamText,
-        mcpAllowlist,
+        mcpAllowlist, ctx,
       );
     } catch (err) {
       if (!(err instanceof AgentError)) throw err;
