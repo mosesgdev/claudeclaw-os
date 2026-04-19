@@ -79,9 +79,10 @@ vi.mock('./db.js', () => ({
   getCompactionCount: vi.fn(() => 0),
 }));
 
-vi.mock('./logger.js', () => ({
-  logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
-}));
+vi.mock('./logger.js', () => {
+  const leaf = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() };
+  return { logger: { ...leaf, child: vi.fn(() => leaf) } };
+});
 
 vi.mock('./memory.js', () => ({
   buildMemoryContext: vi.fn(() => Promise.resolve({ contextText: '', tokenEstimate: 0 })),
