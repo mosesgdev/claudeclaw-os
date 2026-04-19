@@ -204,6 +204,35 @@ Body.
     expect(manifest!.workingDir).toBeUndefined();
   });
 
+  it('parses github.repo from frontmatter', () => {
+    const content = `---
+project: archisell
+status: active
+vault_root: 04-projects/archisell
+memory_namespace: archisell
+discord:
+  category: archisell
+  primary_channel: pm-archisell
+github:
+  repo: moses/archisell
+---
+Body.
+`;
+    const filePath = mkProject('github-repo', content);
+    const manifest = parseManifest(filePath);
+
+    expect(manifest).not.toBeNull();
+    expect(manifest!.github).toEqual({ repo: 'moses/archisell' });
+  });
+
+  it('leaves github undefined when github block is absent', () => {
+    const filePath = mkProject('no-github', VALID_FRONTMATTER);
+    const manifest = parseManifest(filePath);
+
+    expect(manifest).not.toBeNull();
+    expect(manifest!.github).toBeUndefined();
+  });
+
   it('defaults skills, experts, hooks to empty arrays when omitted', () => {
     const content = `---
 project: minimal
