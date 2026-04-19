@@ -147,6 +147,34 @@ Body.
     expect(parseManifest(filePath)).toBeNull();
   });
 
+  it('parses explicit logs_channel from frontmatter', () => {
+    const content = `---
+project: archisell
+status: active
+vault_root: 04-projects/archisell
+memory_namespace: archisell
+discord:
+  category: archisell
+  primary_channel: pm-archisell
+  logs_channel: custom-logs
+---
+Body.
+`;
+    const filePath = mkProject('explicit-logs', content);
+    const manifest = parseManifest(filePath);
+
+    expect(manifest).not.toBeNull();
+    expect(manifest!.discord.logsChannel).toBe('custom-logs');
+  });
+
+  it('defaults logsChannel to "logs" when logs_channel is omitted', () => {
+    const filePath = mkProject('default-logs', VALID_FRONTMATTER);
+    const manifest = parseManifest(filePath);
+
+    expect(manifest).not.toBeNull();
+    expect(manifest!.discord.logsChannel).toBe('logs');
+  });
+
   it('defaults skills, experts, hooks to empty arrays when omitted', () => {
     const content = `---
 project: minimal

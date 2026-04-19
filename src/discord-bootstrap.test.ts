@@ -35,6 +35,10 @@ vi.mock('./discord-channel-map.js', () => ({
   listMappings: vi.fn(() => []),
 }));
 
+vi.mock('./project-logs.js', () => ({
+  setProjectLogsMap: vi.fn(),
+}));
+
 vi.mock('./agent-registry.js', () => ({
   getRegistryEntries: vi.fn<() => RegistryEntry[]>(() => []),
   initAgentRegistry: vi.fn(),
@@ -43,6 +47,7 @@ vi.mock('./agent-registry.js', () => ({
 // Import mocked modules so we can spy/configure them in tests.
 import { upsertMapping, clearStaleMappings, listMappings } from './discord-channel-map.js';
 import { getRegistryEntries, initAgentRegistry } from './agent-registry.js';
+import { setProjectLogsMap } from './project-logs.js';
 
 import { bootstrapDiscordChannelMap } from './discord-bootstrap.js';
 
@@ -54,7 +59,7 @@ function makeManifest(overrides: Partial<ProjectManifest> = {}): ProjectManifest
     status: 'active',
     vaultRoot: '04-projects/archisell',
     memoryNamespace: 'archisell',
-    discord: { category: 'archisell', primaryChannel: 'pm-archisell' },
+    discord: { category: 'archisell', primaryChannel: 'pm-archisell', logsChannel: 'logs' },
     skills: [],
     experts: [],
     hooks: [],
@@ -209,5 +214,53 @@ describe('bootstrapDiscordChannelMap', () => {
     const { client } = makeGuildAndClient([]);
     await bootstrapDiscordChannelMap(client as any);
     expect(initAgentRegistry).toHaveBeenCalledOnce();
+  });
+
+  it('populates the logs map when a logs channel is found under the category', async () => {
+    const manifest = makeManifest();
+    vi.mocked(getRegistryEntries).mockReturnValue([makeRegistryEntry(manifest)]);
+
+    const categoryChannel = makeChannel('cat-001', ChannelType.GuildCategory, 'archisell');
+    const textChannel = makeChannel('ch-001', ChannelType.GuildText, 'pm-archisell', 'cat-001');
+    const logsChannel = makeChannel('ch-logs-001', ChannelType.GuildText, 'logs', 'cat-001');
+    const { client } = makeGuildAndClient([categoryChannel, textChannel, logsChannel]);
+
+    await bootstrapDiscordChannelMap(client as any);
+
+    expect(setProjectLogsMap).toHaveBeenCalledOnce();
+    expect(setProjectLogsMap).toHaveBeenCalledWith({ archisell: 'ch-logs-001' });
+  });
+
+  it('calls setProjectLogsMap with empty map when logs channel is not found', async () => {
+    const manifest = makeManifest();
+    vi.mocked(getRegistryEntries).mockReturnValue([makeRegistryEntry(manifest)]);
+
+    // No logs channel in the guild
+    const categoryChannel = makeChannel('cat-001', ChannelType.GuildCategory, 'archisell');
+    const textChannel = makeChannel('ch-001', ChannelType.GuildText, 'pm-archisell', 'cat-001');
+    const { client } = makeGuildAndClient([categoryChannel, textChannel]);
+
+    await bootstrapDiscordChannelMap(client as any);
+
+    expect(setProjectLogsMap).toHaveBeenCalledOnce();
+    expect(setProjectLogsMap).toHaveBeenCalledWith({});
+    // Primary channel mapping should still succeed
+    expect(upsertMapping).toHaveBeenCalledOnce();
+  });
+
+  it('resolves a custom logs_channel name from the manifest', async () => {
+    const manifest = makeManifest({
+      discord: { category: 'archisell', primaryChannel: 'pm-archisell', logsChannel: 'custom-logs' },
+    });
+    vi.mocked(getRegistryEntries).mockReturnValue([makeRegistryEntry(manifest)]);
+
+    const categoryChannel = makeChannel('cat-001', ChannelType.GuildCategory, 'archisell');
+    const textChannel = makeChannel('ch-001', ChannelType.GuildText, 'pm-archisell', 'cat-001');
+    const customLogsChannel = makeChannel('ch-clogs-001', ChannelType.GuildText, 'custom-logs', 'cat-001');
+    const { client } = makeGuildAndClient([categoryChannel, textChannel, customLogsChannel]);
+
+    await bootstrapDiscordChannelMap(client as any);
+
+    expect(setProjectLogsMap).toHaveBeenCalledWith({ archisell: 'ch-clogs-001' });
   });
 });

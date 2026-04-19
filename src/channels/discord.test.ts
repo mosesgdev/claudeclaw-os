@@ -13,10 +13,16 @@ function makeFakeMessage(channelId = 'C1', userId = 'U1', userName = 'moses') {
 }
 
 describe('DiscordChannel', () => {
-  it('uses channel id as chatKey with discord: prefix', () => {
+  it('uses channel id as chatKey with discord:channel: prefix', () => {
     const msg = makeFakeMessage('C42');
     const ch = new DiscordChannel(msg.channel as any, msg.author as any);
-    expect(ch.chatKey).toBe('discord:C42');
+    expect(ch.chatKey).toBe('discord:channel:C42');
+  });
+
+  it('uses the provided chatKey when passed explicitly (thread case)', () => {
+    const msg = makeFakeMessage('T1');
+    const ch = new DiscordChannel(msg.channel as any, msg.author as any, 'discord:thread:T1');
+    expect(ch.chatKey).toBe('discord:thread:T1');
   });
 
   it('userLabel is the username', () => {

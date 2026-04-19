@@ -11,7 +11,7 @@ export interface ProjectManifest {
   status: 'active' | 'archived';
   vaultRoot: string;
   memoryNamespace: string;
-  discord: { category: string; primaryChannel: string };
+  discord: { category: string; primaryChannel: string; logsChannel: string };
   skills: string[];
   experts: string[];
   hooks: string[];
@@ -80,6 +80,11 @@ export function parseManifest(filePath: string): ProjectManifest | null {
     discord: {
       category: (discord as Record<string, unknown>)['category'] as string,
       primaryChannel: (discord as Record<string, unknown>)['primary_channel'] as string,
+      logsChannel:
+        typeof (discord as Record<string, unknown>)['logs_channel'] === 'string' &&
+        (discord as Record<string, unknown>)['logs_channel']
+          ? ((discord as Record<string, unknown>)['logs_channel'] as string)
+          : 'logs',
     },
     skills: Array.isArray(data['skills']) ? (data['skills'] as string[]) : [],
     experts: Array.isArray(data['experts']) ? (data['experts'] as string[]) : [],

@@ -7,6 +7,7 @@ import { loadAgentConfig, listAgentIds, resolveAgentDir, resolveAgentClaudeMd } 
 import { createBot } from './bot.js';
 import { createDiscordBot } from './discord-bot.js';
 import { bootstrapDiscordChannelMap } from './discord-bootstrap.js';
+import { setProjectLogsSender } from './project-logs.js';
 import { checkPendingMigrations } from './migrations.js';
 import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, SECURITY_PIN_HASH, IDLE_LOCK_MINUTES, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, discordConfig } from './config.js';
 import { startDashboard } from './dashboard.js';
@@ -428,6 +429,12 @@ async function main(): Promise<void> {
             }
           });
           await bootstrapDiscordChannelMap(discordClient);
+          setProjectLogsSender(async (channelId, content) => {
+            const ch = await discordClient.channels.fetch(channelId);
+            if (ch && 'send' in ch && typeof ch.send === 'function') {
+              await (ch as any).send(content);
+            }
+          });
         } catch (err) {
           // Never let a Discord credential or transient Discord outage take
           // down the daemon — Telegram is the primary transport.

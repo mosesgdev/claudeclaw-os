@@ -19,6 +19,7 @@ import {
 } from './media.js';
 import { lookupAgentForChannel } from './discord-channel-map.js';
 import { getRegistryContext } from './agent-registry.js';
+import { resolveRoutingChannelId, resolveDiscordChatKey } from './discord-routing.js';
 import type { AgentContext } from './agent-context.js';
 
 const log = logger.child({ name: 'discord-bot' });
@@ -78,20 +79,24 @@ export function createDiscordBot(): Client | null {
     // allowedChannelIds filter below is skipped for DMs even if the list were non-empty.
     if (message.guildId !== discordConfig.guildId) return;
 
+    // Resolve the channel ID to use for agent lookup. For thread messages,
+    // this is the parent text channel's ID (the one stored in the map).
+    const routingChannelId = resolveRoutingChannelId(message);
+
     // Project-agent channel routing (feature-gated).
-    // If the incoming channel is mapped to a project agent, use that agent's
-    // context instead of the default. The mapping IS the ACL — no additional
-    // allowedChannelIds check is needed for routed channels.
+    // If the incoming channel (or its thread parent) is mapped to a project
+    // agent, use that agent's context instead of the default. The mapping IS
+    // the ACL — no additional allowedChannelIds check is needed for routed channels.
     let overrideCtx: AgentContext | undefined;
     if (PROJECT_AGENTS_ENABLED) {
-      const routedAgentId = lookupAgentForChannel(message.channel.id);
+      const routedAgentId = lookupAgentForChannel(routingChannelId);
       if (routedAgentId) {
         const ctx = getRegistryContext(routedAgentId);
         if (ctx) {
           overrideCtx = ctx;
         } else {
           log.warn(
-            { channelId: message.channel.id, agentId: routedAgentId },
+            { channelId: routingChannelId, agentId: routedAgentId },
             'Channel mapped to unknown agent; falling back to default',
           );
         }
@@ -99,16 +104,18 @@ export function createDiscordBot(): Client | null {
     }
 
     // If NOT routed via project agent, enforce the existing channel whitelist.
+    // Threads inherit the parent's whitelist membership.
     if (!overrideCtx) {
       if (
         discordConfig.allowedChannelIds.length > 0 &&
-        !discordConfig.allowedChannelIds.includes(message.channel.id)
+        !discordConfig.allowedChannelIds.includes(routingChannelId)
       ) {
         return;
       }
     }
 
-    const channel = new DiscordChannel(message.channel as any, message.author);
+    const chatKey = resolveDiscordChatKey(message);
+    const channel = new DiscordChannel(message.channel as any, message.author, chatKey);
 
     // If the user attached a file, download the first one and hand Claude the
     // local path via the same build*Message helpers the Telegram per-type
