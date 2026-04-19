@@ -67,7 +67,11 @@ export function decryptField(ciphertext: string): string {
 
 let db: Database.Database;
 
-/** Return the underlying better-sqlite3 instance after initDatabase() has been called. */
+/**
+ * Return the underlying better-sqlite3 instance after initDatabase() has been called.
+ * Used by modules that need direct prepared-statement access
+ * (e.g. discord-channel-map.ts, memory-vault-links.ts) instead of re-opening the file.
+ */
 export function getDb(): Database.Database {
   return db;
 }
@@ -656,15 +660,6 @@ export function _initTestDatabase(): void {
   db.pragma('journal_mode = WAL');
   createSchema(db);
   runMigrations(db);
-}
-
-/**
- * Return the active database instance.
- * Modules outside db.ts that need direct prepared-statement access
- * (e.g. discord-channel-map.ts) use this instead of re-opening the file.
- */
-export function getDb(): Database.Database {
-  return db;
 }
 
 export function getSession(chatId: string, agentId = 'main'): string | undefined {

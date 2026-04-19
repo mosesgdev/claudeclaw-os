@@ -275,31 +275,22 @@ function replaceFrontmatter(content: string, fm: Record<string, unknown>): strin
 }
 
 /**
- * Check if a project is archived by reading context.md or project.yaml
- * from the project's folder under 04-projects/.
+ * Check if a project is archived by reading its context.md frontmatter status field.
+ * Only inspects `status` — avoids requiring a full RFC 1 manifest, since a project
+ * folder might exist with a minimal context.md (status only) and still be archived.
  * Returns true if status === 'archived', false otherwise.
  * Never throws — returns false on any error.
  */
 export function isProjectArchived(vaultRoot: string, projectName: string, conventions: VaultConventions): boolean {
-  const projectFolder = path.join(vaultRoot, conventions.folders.project, projectName);
-  // Check context.md frontmatter first
-  for (const candidate of ['context.md', 'project.yaml', 'project.yml']) {
-    const fp = path.join(projectFolder, candidate);
-    if (!fs.existsSync(fp)) continue;
-    try {
-      const raw = fs.readFileSync(fp, 'utf-8');
-      let fm: Record<string, unknown>;
-      if (candidate.endsWith('.yaml') || candidate.endsWith('.yml')) {
-        fm = (yaml.load(raw) as Record<string, unknown>) ?? {};
-      } else {
-        fm = parseFrontmatter(raw);
-      }
-      if (fm['status'] === 'archived') return true;
-    } catch {
-      // ignore, keep checking
-    }
+  const contextPath = path.join(vaultRoot, conventions.folders.project, projectName, 'context.md');
+  if (!fs.existsSync(contextPath)) return false;
+  try {
+    const raw = fs.readFileSync(contextPath, 'utf-8');
+    const fm = parseFrontmatter(raw);
+    return fm['status'] === 'archived';
+  } catch {
+    return false;
   }
-  return false;
 }
 
 /** Load a template for a given type from vault _meta/templates/ or inline fallback. */
