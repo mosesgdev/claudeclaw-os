@@ -184,12 +184,16 @@ async function main(): Promise<void> {
   const discordClient = AGENT_ID === 'main' ? createDiscordBot() : null;
 
   // Register notification transports for proactive fan-out (scheduler results,
-  // memory alerts, War Room errors). Telegram is always registered when a
-  // destination chat is known. Discord is registered only when a notify channel
-  // is explicitly configured via DISCORD_ALLOWED_CHANNEL_IDS[0].
-  registerTransport('telegram', async (text) => {
-    await bot.api.sendMessage(Number(ALLOWED_CHAT_ID), text);
-  });
+  // memory alerts, War Room errors). Telegram is registered only when a
+  // destination chat is configured — otherwise Number('') resolves to chat_id 0
+  // and every notification silently fails inside the transport's catch block.
+  // Discord is registered only when a notify channel is explicitly configured
+  // via DISCORD_ALLOWED_CHANNEL_IDS[0].
+  if (ALLOWED_CHAT_ID) {
+    registerTransport('telegram', async (text) => {
+      await bot.api.sendMessage(Number(ALLOWED_CHAT_ID), text);
+    });
+  }
 
   if (discordClient && discordConfig.allowedChannelIds[0]) {
     registerTransport('discord', async (text) => {
