@@ -45,6 +45,7 @@ const envConfig = readEnvFile([
   'VAULT_PROJECTS_ROOT',
   'PROJECT_AGENTS_ENABLED',
   'AGENTIC_MASTER_ROOT',
+  'OBSIDIAN_WRITE_ENABLED',
 ]);
 
 // ── Multi-agent support ──────────────────────────────────────────────
@@ -316,6 +317,10 @@ export const PROJECT_AGENTS_ENABLED =
 export const AGENTIC_MASTER_ROOT = expandHome(
   process.env.AGENTIC_MASTER_ROOT || envConfig.AGENTIC_MASTER_ROOT || '~/agentic-master',
 );
+
+// Gates the vault mirror hook (RFC 2). Default: false.
+export const OBSIDIAN_WRITE_ENABLED =
+  (process.env.OBSIDIAN_WRITE_ENABLED || envConfig.OBSIDIAN_WRITE_ENABLED || 'false').toLowerCase() === 'true';
 
 // ── Discord Gateway ──────────────────────────────────────────────────
 export const discordConfig = {

@@ -11,6 +11,17 @@ export function setHighImportanceCallback(cb: (memoryId: number, summary: string
   onHighImportanceMemory = cb;
 }
 
+// Callback for mirroring memories to the Obsidian vault (RFC 2e).
+// Fires at a lower threshold (0.7) than the Telegram notification (0.8).
+// Set by bot.ts to spawn vault-bridge-cli detached.
+let onMirrorMemory: ((memoryId: number, summary: string, importance: number, topics: string[]) => void) | null = null;
+
+export function setMirrorCallback(
+  cb: (memoryId: number, summary: string, importance: number, topics: string[]) => void,
+): void {
+  onMirrorMemory = cb;
+}
+
 interface ExtractionResult {
   summary: string;
   entities: string[];
@@ -140,6 +151,12 @@ export async function ingestConversationTurn(
     // Notify on high-importance memories so the user can pin them
     if (importance >= 0.8 && onHighImportanceMemory) {
       try { onHighImportanceMemory(memoryId, result.summary, importance); } catch { /* non-fatal */ }
+    }
+
+    // Mirror memories at a lower threshold to the Obsidian vault (RFC 2e).
+    // Fires independently of the notification callback — one failure never blocks the other.
+    if (importance >= 0.7 && onMirrorMemory) {
+      try { onMirrorMemory(memoryId, result.summary, importance, result.topics ?? []); } catch { /* non-fatal */ }
     }
 
     logger.info(
