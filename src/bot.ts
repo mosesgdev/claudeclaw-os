@@ -21,6 +21,7 @@ import {
   agentDefaultModel,
   agentMcpAllowlist,
   agentSystemPrompt,
+  agentObsidianConfig,
   TYPING_REFRESH_MS,
   AGENT_TIMEOUT_MS,
   STREAM_STRATEGY,
@@ -33,6 +34,7 @@ import {
   DAILY_COST_BUDGET,
   HOURLY_TOKEN_BUDGET,
   PROJECT_ROOT,
+  OBSIDIAN_WRITE_ENABLED,
 } from './config.js';
 import { clearSession, getRecentConversation, getRecentMemories, getRecentTaskOutputs, getSession, getSessionConversation, logToHiveMind, pinMemory, unpinMemory, setSession, lookupWaChatId, saveWaMessageMap, saveTokenUsage, saveCompactionEvent, getCompactionCount } from './db.js';
 import { logger } from './logger.js';
@@ -43,7 +45,9 @@ import { notifyUser } from './notify.js';
 import { scanForSecrets, redactSecrets } from './exfiltration-guard.js';
 import { trackUsage, getRateStatus } from './rate-tracker.js';
 import { buildCostFooter } from './cost-footer.js';
-import { setHighImportanceCallback } from './memory-ingest.js';
+import { setHighImportanceCallback, setMirrorCallback } from './memory-ingest.js';
+import { makeVaultMirrorCallback, makeConsolidationMirror } from './vault-mirror.js';
+import { setConsolidationMirror } from './memory-consolidate.js';
 import { messageQueue } from './message-queue.js';
 import { parseDelegation, delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { emitChatEvent, setProcessing, setActiveAbort, abortActiveQuery } from './state.js';
@@ -912,6 +916,26 @@ export function createBot(): Bot {
       const msg = `🧠 New memory #${memoryId} [${importance.toFixed(1)}]: ${summary.slice(0, 200)}\n\n/pin ${memoryId} to make permanent`;
       notifyUser(msg).catch(() => {});
     });
+  }
+
+  // Register vault mirror callback (RFC 2e). Fires at importance >= 0.7 to
+  // mirror memories into the Obsidian vault via vault-bridge-cli (fire-and-forget).
+  // Gated behind OBSIDIAN_WRITE_ENABLED (default false).
+  {
+    const cliPath = path.join(PROJECT_ROOT, 'dist', 'vault-bridge-cli.js');
+    const mirrorConfig = agentObsidianConfig?.vault
+      ? { cliPath, projectRoot: PROJECT_ROOT, agentId: AGENT_ID, vaultRoot: agentObsidianConfig.vault }
+      : null;
+
+    const mirrorCb = makeVaultMirrorCallback(OBSIDIAN_WRITE_ENABLED, mirrorConfig);
+    if (mirrorCb) {
+      setMirrorCallback(mirrorCb);
+    }
+
+    // Register consolidation mirror callback (RFC 2f). Fires after each consolidation
+    // with average importance >= 0.7 to write reflections into the vault.
+    const consolidationMirrorCb = makeConsolidationMirror(OBSIDIAN_WRITE_ENABLED, mirrorConfig);
+    setConsolidationMirror(consolidationMirrorCb);
   }
 
   // Register commands in the Telegram menu (built-in + auto-discovered skills)

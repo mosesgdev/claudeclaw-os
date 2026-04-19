@@ -44,6 +44,8 @@ const envConfig = readEnvFile([
   'DISCORD_MAX_LENGTH',
   'VAULT_PROJECTS_ROOT',
   'PROJECT_AGENTS_ENABLED',
+  'AGENTIC_MASTER_ROOT',
+  'OBSIDIAN_WRITE_ENABLED',
 ]);
 
 // ── Multi-agent support ──────────────────────────────────────────────
@@ -307,6 +309,18 @@ export const VAULT_PROJECTS_ROOT = expandHome(rawVaultProjectsRoot);
  */
 export const PROJECT_AGENTS_ENABLED =
   (process.env.PROJECT_AGENTS_ENABLED || envConfig.PROJECT_AGENTS_ENABLED || 'false').toLowerCase() === 'true';
+
+// ── Agentic-master root ───────────────────────────────────────────────
+// Path to the local agentic-master installation. Used by vault-bridge-cli
+// to load expertise/obsidian-vault.yaml and by future memory mirror hooks.
+// Default: ~/agentic-master. Override via AGENTIC_MASTER_ROOT in .env.
+export const AGENTIC_MASTER_ROOT = expandHome(
+  process.env.AGENTIC_MASTER_ROOT || envConfig.AGENTIC_MASTER_ROOT || '~/agentic-master',
+);
+
+// Gates the vault mirror hook (RFC 2). Default: false.
+export const OBSIDIAN_WRITE_ENABLED =
+  (process.env.OBSIDIAN_WRITE_ENABLED || envConfig.OBSIDIAN_WRITE_ENABLED || 'false').toLowerCase() === 'true';
 
 // ── Discord Gateway ──────────────────────────────────────────────────
 export const discordConfig = {
