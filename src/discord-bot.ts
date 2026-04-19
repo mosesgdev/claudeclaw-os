@@ -10,6 +10,12 @@ import { discordConfig } from './config.js';
 import { handleMessage } from './bot.js';
 import { registerSlashCommands, wireSlashCommands } from './discord-commands.js';
 import { logger } from './logger.js';
+import {
+  downloadDiscordAttachment,
+  buildPhotoMessage,
+  buildVideoMessage,
+  buildDocumentMessage,
+} from './media.js';
 
 const log = logger.child({ name: 'discord-bot' });
 
@@ -61,8 +67,38 @@ export function createDiscordBot(): Client | null {
     }
 
     const channel = new DiscordChannel(message.channel as any, message.author);
+
+    // If the user attached a file, download the first one and hand Claude the
+    // local path via the same build*Message helpers the Telegram per-type
+    // handlers use. Discord allows up to 10 attachments per message; v1 only
+    // processes the first. Download failures degrade to plain-text handling.
+    let text = message.content;
+    const firstAttachment = message.attachments.first();
+    if (firstAttachment) {
+      try {
+        const localPath = await downloadDiscordAttachment(
+          firstAttachment.url,
+          firstAttachment.name ?? 'file',
+        );
+        const mime = firstAttachment.contentType ?? '';
+        const caption = message.content || undefined;
+        if (mime.startsWith('image/')) {
+          text = buildPhotoMessage(localPath, caption);
+        } else if (mime.startsWith('video/')) {
+          text = buildVideoMessage(localPath, caption);
+        } else {
+          text = buildDocumentMessage(localPath, firstAttachment.name ?? 'file', caption);
+        }
+      } catch (err) {
+        log.error(
+          { err, url: firstAttachment.url, chatKey: channel.chatKey },
+          'Discord attachment download failed',
+        );
+      }
+    }
+
     const inbound: InboundMessage = {
-      text: message.content,
+      text,
       chatKey: channel.chatKey,
       userLabel: channel.userLabel,
       attachments: [...message.attachments.values()].map((att) => ({

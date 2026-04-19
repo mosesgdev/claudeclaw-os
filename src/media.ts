@@ -127,6 +127,22 @@ export async function downloadMedia(
 }
 
 /**
+ * Download a Discord CDN attachment (no auth needed) into UPLOADS_DIR and
+ * return the local path. Mirrors downloadMedia() but skips the Telegram
+ * getFile round-trip since Discord hands us a direct URL.
+ */
+export async function downloadDiscordAttachment(
+  url: string,
+  originalFilename: string,
+): Promise<string> {
+  const filename = sanitizeFilename(originalFilename || 'file');
+  const localFilename = `${Date.now()}_${filename}`;
+  const localPath = path.join(UPLOADS_DIR, localFilename);
+  await httpsDownload(url, localPath);
+  return localPath;
+}
+
+/**
  * Build the message text to send to Claude when a photo is received.
  * Claude Code's Read tool can open image files -- just give it the path.
  */
