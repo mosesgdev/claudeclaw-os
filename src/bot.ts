@@ -241,20 +241,20 @@ export function formatForTelegram(text: string): string {
 }
 
 /**
- * Split a long response into Telegram-safe chunks (4096 chars).
+ * Split a long response into channel-safe chunks.
  * Splits on newlines where possible to avoid breaking mid-sentence.
  */
-export function splitMessage(text: string): string[] {
-  if (text.length <= MAX_MESSAGE_LENGTH) return [text];
+export function splitMessage(text: string, maxLen: number = MAX_MESSAGE_LENGTH): string[] {
+  if (text.length <= maxLen) return [text];
 
   const parts: string[] = [];
   let remaining = text;
 
-  while (remaining.length > MAX_MESSAGE_LENGTH) {
+  while (remaining.length > maxLen) {
     // Try to split on a newline within the limit
-    const chunk = remaining.slice(0, MAX_MESSAGE_LENGTH);
+    const chunk = remaining.slice(0, maxLen);
     const lastNewline = chunk.lastIndexOf('\n');
-    const splitAt = lastNewline > MAX_MESSAGE_LENGTH / 2 ? lastNewline : MAX_MESSAGE_LENGTH;
+    const splitAt = lastNewline > maxLen / 2 ? lastNewline : maxLen;
     parts.push(remaining.slice(0, splitAt));
     remaining = remaining.slice(splitAt).trimStart();
   }
@@ -477,7 +477,7 @@ async function handleMessage(channel: MessageChannel, inbound: InboundMessage, f
       }
       emitChatEvent({ type: 'assistant_message', chatId: chatIdStr, content: response, source: 'telegram' });
 
-      for (const part of splitMessage(formatForTelegram(`${header}\n\n${response}`))) {
+      for (const part of splitMessage(formatForTelegram(`${header}\n\n${response}`), channel.maxLength)) {
         await channel.send(part, { parseMode: 'HTML' });
       }
     } catch (err) {
@@ -588,8 +588,10 @@ async function handleMessage(channel: MessageChannel, inbound: InboundMessage, f
       if (now - globalLast < GLOBAL_STREAM_INTERVAL_MS || deltaLen < 20) return;
 
       let displayText = accumulated;
-      if (displayText.length > 4000) {
-        displayText = '...' + displayText.slice(displayText.length - 3900);
+      const truncCap = tg!.maxLength - 96;    // e.g. 4096 - 96 = 4000
+      const truncKeep = tg!.maxLength - 196;  // e.g. 4096 - 196 = 3900
+      if (displayText.length > truncCap) {
+        displayText = '...' + displayText.slice(displayText.length - truncKeep);
       }
       displayText += ' ▍';
 
@@ -718,16 +720,18 @@ async function handleMessage(channel: MessageChannel, inbound: InboundMessage, f
           if (tg) {
             await tg.rawContext.replyWithVoice(new InputFile(audioBuffer, 'response.ogg'));
           } else {
+            // TODO(Task 10): Discord needs audioBuffer written to a temp file before sendFile;
+            // the current cast is safe only because non-Telegram TTS isn't actually invoked yet.
             await channel.sendFile(audioBuffer as unknown as string, undefined);
           }
         } catch (ttsErr) {
           logger.error({ err: ttsErr }, 'TTS failed, falling back to text');
-          for (const part of splitMessage(formatForTelegram(textWithFooter))) {
+          for (const part of splitMessage(formatForTelegram(textWithFooter), channel.maxLength)) {
             await channel.send(part, { parseMode: 'HTML' });
           }
         }
       } else {
-        for (const part of splitMessage(formatForTelegram(textWithFooter))) {
+        for (const part of splitMessage(formatForTelegram(textWithFooter), channel.maxLength)) {
           await channel.send(part, { parseMode: 'HTML' });
         }
       }
