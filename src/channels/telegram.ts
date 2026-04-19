@@ -7,6 +7,8 @@ export class TelegramChannel implements MessageChannel {
   readonly userLabel: string;
   readonly maxLength = 4096;
 
+  get rawContext(): Context { return this.ctx; }
+
   constructor(private readonly ctx: Context) {
     const chatId = ctx.chat?.id ?? 0;
     this.chatKey = `telegram:${chatId}`;
