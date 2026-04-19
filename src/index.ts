@@ -3,8 +3,9 @@ import path from 'path';
 
 import { loadAgentConfig, listAgentIds, resolveAgentDir, resolveAgentClaudeMd } from './agent-config.js';
 import { createBot } from './bot.js';
+import { createDiscordBot } from './discord-bot.js';
 import { checkPendingMigrations } from './migrations.js';
-import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, SECURITY_PIN_HASH, IDLE_LOCK_MINUTES, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT } from './config.js';
+import { ALLOWED_CHAT_ID, activeBotToken, STORE_DIR, PROJECT_ROOT, CLAUDECLAW_CONFIG, GOOGLE_API_KEY, setAgentOverrides, SECURITY_PIN_HASH, IDLE_LOCK_MINUTES, EMERGENCY_KILL_PHRASE, WARROOM_ENABLED, WARROOM_PORT, discordConfig } from './config.js';
 import { startDashboard } from './dashboard.js';
 import { initDatabase, cleanupOldMissionTasks, insertAuditLog } from './db.js';
 import { initSecurity, setAuditCallback } from './security.js';
@@ -176,6 +177,7 @@ async function main(): Promise<void> {
   cleanupOldUploads();
 
   const bot = createBot();
+  const discordClient = createDiscordBot();
 
   // Dashboard only runs in the main bot process
   if (AGENT_ID === 'main') {
@@ -349,6 +351,10 @@ async function main(): Promise<void> {
     logger.info('Shutting down...');
     setTelegramConnected(false);
     releaseLock();
+    if (discordClient) {
+      logger.info('Disconnecting Discord client...');
+      await discordClient.destroy();
+    }
     await bot.stop();
     process.exit(0);
   };
@@ -366,7 +372,7 @@ async function main(): Promise<void> {
   }
 
   await bot.start({
-    onStart: (botInfo) => {
+    onStart: async (botInfo) => {
       setTelegramConnected(true);
       setBotInfo(botInfo.username ?? '', botInfo.first_name ?? 'ClaudeClaw');
       logger.info({ username: botInfo.username }, 'ClaudeClaw is running');
@@ -378,6 +384,10 @@ async function main(): Promise<void> {
         console.log();
       } else {
         console.log(`\n  ClaudeClaw agent [${AGENT_ID}] online: @${botInfo.username}\n`);
+      }
+      if (discordClient) {
+        await discordClient.login(discordConfig.botToken);
+        logger.info('Discord login complete');
       }
     },
   });
