@@ -1,6 +1,6 @@
 import { CronExpressionParser } from 'cron-parser';
 
-import { AGENT_ID, ALLOWED_CHAT_ID, agentMcpAllowlist } from './config.js';
+import { AGENT_ID, ALLOWED_CHAT_ID, agentMcpAllowlist, PROJECT_AGENTS_ENABLED } from './config.js';
 import {
   getDueTasks,
   getSession,
@@ -16,6 +16,7 @@ import { logger } from './logger.js';
 import { messageQueue } from './message-queue.js';
 import { runAgent } from './agent.js';
 import { formatForTelegram, splitMessage } from './bot.js';
+import { sendProjectLog } from './project-logs.js';
 
 type Sender = (text: string) => Promise<void>;
 
@@ -89,6 +90,10 @@ async function runDueTasks(): Promise<void> {
 
       try {
         await sender(`Scheduled task running: "${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? '...' : ''}"`);
+        if (PROJECT_AGENTS_ENABLED) {
+          void sendProjectLog(schedulerAgentId, 'info', `[scheduled] ${task.prompt.slice(0, 60)} running`);
+        }
+        const taskStart = Date.now();
 
         // Run as a fresh agent call (no session — scheduled tasks are autonomous)
         const result = await runAgent(task.prompt, undefined, () => {}, undefined, undefined, abortController, undefined, agentMcpAllowlist);
@@ -114,12 +119,19 @@ async function runDueTasks(): Promise<void> {
         }
 
         updateTaskAfterRun(task.id, nextRun, text, 'success');
+        if (PROJECT_AGENTS_ENABLED) {
+          const durationMs = Date.now() - taskStart;
+          void sendProjectLog(schedulerAgentId, 'info', `[scheduled] ${task.prompt.slice(0, 60)} done (${(durationMs / 1000).toFixed(1)}s)`);
+        }
 
         logger.info({ taskId: task.id, nextRun }, 'Task complete, next run scheduled');
       } catch (err) {
         clearTimeout(timeout);
         const errMsg = err instanceof Error ? err.message : String(err);
         updateTaskAfterRun(task.id, nextRun, errMsg.slice(0, 500), 'failed');
+        if (PROJECT_AGENTS_ENABLED) {
+          void sendProjectLog(schedulerAgentId, 'warn', `[scheduled] ${task.prompt.slice(0, 60)} failed: ${errMsg.slice(0, 100)}`);
+        }
 
         logger.error({ err, taskId: task.id }, 'Scheduled task failed');
         try {

@@ -2,6 +2,8 @@ import { generateContent, parseJsonResponse } from './gemini.js';
 import { cosineSimilarity, embedText } from './embeddings.js';
 import { getMemoriesWithEmbeddings, saveStructuredMemoryAtomic } from './db.js';
 import { logger } from './logger.js';
+import { PROJECT_AGENTS_ENABLED } from './config.js';
+import { sendProjectLog } from './project-logs.js';
 
 // Callback for notifying when a high-importance memory is created.
 // Set by bot.ts to send a Telegram notification.
@@ -151,6 +153,11 @@ export async function ingestConversationTurn(
     // Notify on high-importance memories so the user can pin them
     if (importance >= 0.8 && onHighImportanceMemory) {
       try { onHighImportanceMemory(memoryId, result.summary, importance); } catch { /* non-fatal */ }
+    }
+
+    // Emit to Discord project logs channel if enabled
+    if (PROJECT_AGENTS_ENABLED) {
+      void sendProjectLog(agentId, 'info', `[memory] Saved: "${result.summary.slice(0, 140)}" (importance ${importance.toFixed(2)})`);
     }
 
     // Mirror memories at a lower threshold to the Obsidian vault (RFC 2e).

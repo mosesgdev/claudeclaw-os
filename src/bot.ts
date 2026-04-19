@@ -35,6 +35,7 @@ import {
   HOURLY_TOKEN_BUDGET,
   PROJECT_ROOT,
   OBSIDIAN_WRITE_ENABLED,
+  PROJECT_AGENTS_ENABLED,
 } from './config.js';
 import { clearSession, getRecentConversation, getRecentMemories, getRecentTaskOutputs, getSession, getSessionConversation, logToHiveMind, pinMemory, unpinMemory, setSession, lookupWaChatId, saveWaMessageMap, saveTokenUsage, saveCompactionEvent, getCompactionCount } from './db.js';
 import { logger } from './logger.js';
@@ -46,6 +47,7 @@ import { scanForSecrets, redactSecrets } from './exfiltration-guard.js';
 import { trackUsage, getRateStatus } from './rate-tracker.js';
 import { buildCostFooter } from './cost-footer.js';
 import { setHighImportanceCallback, setMirrorCallback } from './memory-ingest.js';
+import { sendProjectLog } from './project-logs.js';
 import { makeVaultMirrorCallback, makeConsolidationMirror } from './vault-mirror.js';
 import { setConsolidationMirror } from './memory-consolidate.js';
 import { messageQueue } from './message-queue.js';
@@ -833,6 +835,11 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
     } else {
       logger.error({ err }, 'Agent error (unclassified)');
       await channel.send('Something went wrong. Check the logs and try again.');
+    }
+
+    if (PROJECT_AGENTS_ENABLED) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      void sendProjectLog(agentCtx.agentId, 'error', `[error] handleMessage: ${errMsg.slice(0, 200)}`);
     }
   }
 }
