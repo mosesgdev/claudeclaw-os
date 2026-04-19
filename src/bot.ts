@@ -376,17 +376,22 @@ async function replyIfLocked(ctx: Context): Promise<boolean> {
  */
 export async function handleMessage(channel: MessageChannel, inbound: InboundMessage, forceVoiceReply = false, skipLog = false): Promise<void> {
   const message = inbound.text;
+  const isTelegram = inbound.chatKey.startsWith('telegram:');
   const chatIdStr = inbound.chatKey.replace(/^telegram:/, '');
-  const chatId = parseInt(chatIdStr, 10);
+  // chatId (numeric) is meaningful only for Telegram. Non-Telegram transports
+  // (Discord, etc.) authorize upstream at the adapter layer and carry their
+  // own non-numeric channel ids inside chatKey — leave chatId as NaN for them
+  // and skip the Telegram-specific gates below.
+  const chatId = isTelegram ? parseInt(chatIdStr, 10) : NaN;
 
-  // Security gate
-  if (!isAuthorised(chatId)) {
-    logger.warn({ chatId }, 'Rejected message from unauthorised chat');
+  // Security gate (Telegram-only; other transports gate at the adapter layer)
+  if (isTelegram && !isAuthorised(chatId)) {
+    logger.warn({ chatKey: inbound.chatKey }, 'Rejected message from unauthorised chat');
     return;
   }
 
-  // First-run setup: auto-save the chat ID and restart
-  if (!ALLOWED_CHAT_ID) {
+  // First-run setup: auto-save the chat ID and restart (Telegram-only)
+  if (isTelegram && !ALLOWED_CHAT_ID) {
     const envPath = path.join(PROJECT_ROOT, '.env');
     try {
       let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';

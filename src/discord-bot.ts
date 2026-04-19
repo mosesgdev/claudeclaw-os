@@ -66,8 +66,13 @@ export function createDiscordBot(): Client | null {
     try {
       await handleMessage(channel, inbound);
     } catch (err) {
-      log.error({ err }, 'discord handleMessage failed');
-      await channel.send('sorry, I hit an error handling that').catch(() => {});
+      log.error({ err, chatKey: channel.chatKey }, 'discord handleMessage failed');
+      try {
+        await channel.send('sorry, I hit an error handling that');
+      } catch {
+        // best-effort: a send failure here (rate limit, destroyed channel) must
+        // not surface as an unhandled rejection on the event loop
+      }
     }
   });
 
