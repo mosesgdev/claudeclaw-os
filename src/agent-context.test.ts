@@ -3,8 +3,10 @@ import {
   setDefaultAgentContext,
   getDefaultAgentContext,
   buildContextFromYaml,
+  buildContextFromManifest,
   type AgentContext,
 } from './agent-context.js';
+import type { ProjectManifest } from './project-manifests.js';
 import type { AgentConfig } from './agent-config.js';
 
 // Helper to reset the module-level singleton between tests.
@@ -94,5 +96,47 @@ describe('buildContextFromYaml', () => {
     const ctx = buildContextFromYaml('x', baseCfg, '/tmp');
     expect(ctx.project).toBeUndefined();
     expect(ctx.vaultRoot).toBeUndefined();
+  });
+});
+
+describe('buildContextFromManifest', () => {
+  const baseManifest: ProjectManifest = {
+    project: 'archisell',
+    status: 'active',
+    vaultRoot: '04-projects/archisell',
+    memoryNamespace: 'archisell',
+    discord: { category: 'archisell', primaryChannel: 'pm-archisell' },
+    skills: ['gmail', 'google-calendar'],
+    experts: [],
+    hooks: [],
+    systemPrompt: '# Archisell\n\nProject context body.',
+    sourcePath: '/vault/04-projects/archisell/context.md',
+  };
+
+  it('maps manifest fields to AgentContext correctly', () => {
+    const ctx = buildContextFromManifest(baseManifest, '/vault', '/project');
+    expect(ctx.agentId).toBe('archisell');
+    expect(ctx.name).toBe('archisell');
+    expect(ctx.source).toBe('manifest');
+    expect(ctx.project).toBe('archisell');
+    expect(ctx.vaultRoot).toBe('04-projects/archisell');
+    expect(ctx.systemPrompt).toBe('# Archisell\n\nProject context body.');
+    expect(ctx.allowedSkills).toEqual(['gmail', 'google-calendar']);
+    expect(ctx.obsidian?.vault).toBe('/vault');
+    expect(ctx.obsidian?.folders).toEqual(['04-projects/archisell']);
+    expect(ctx.obsidian?.readOnly).toEqual(['05-knowledge', '00-inbox']);
+    expect(ctx.cwd).toBe('/project');
+  });
+
+  it('uses memoryNamespace as agentId (not project slug)', () => {
+    const m: ProjectManifest = { ...baseManifest, memoryNamespace: 'arch-ns', project: 'archisell' };
+    const ctx = buildContextFromManifest(m, '/vault', '/project');
+    expect(ctx.agentId).toBe('arch-ns');
+    expect(ctx.name).toBe('archisell');
+  });
+
+  it('has no botToken (Discord-only agents have no Telegram token)', () => {
+    const ctx = buildContextFromManifest(baseManifest, '/vault', '/project');
+    expect(ctx.botToken).toBeUndefined();
   });
 });

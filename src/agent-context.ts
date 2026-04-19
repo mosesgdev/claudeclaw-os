@@ -33,6 +33,37 @@ export function getDefaultAgentContext(): AgentContext {
 }
 
 /**
+ * Build an AgentContext from a project manifest (context.md frontmatter).
+ *
+ * @param m              The parsed ProjectManifest
+ * @param vaultRootPath  Absolute path to the vault root (parent of 04-projects)
+ * @param cwd            Working directory for the agent (typically PROJECT_ROOT).
+ *                       Passed explicitly to keep agent-context free of config imports
+ *                       (prevents a circular dependency with config.ts).
+ */
+export function buildContextFromManifest(
+  m: import('./project-manifests.js').ProjectManifest,
+  vaultRootPath: string,
+  cwd: string,
+): AgentContext {
+  return {
+    agentId: m.memoryNamespace,
+    name: m.project,
+    source: 'manifest',
+    cwd,
+    obsidian: {
+      vault: vaultRootPath,
+      folders: [m.vaultRoot],
+      readOnly: ['05-knowledge', '00-inbox'],
+    },
+    systemPrompt: m.systemPrompt,
+    allowedSkills: m.skills,
+    project: m.project,
+    vaultRoot: m.vaultRoot,
+  };
+}
+
+/**
  * Build an AgentContext from a yaml-sourced AgentConfig.
  *
  * @param agentId      The agent's stable identifier

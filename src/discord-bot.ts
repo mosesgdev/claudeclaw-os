@@ -6,7 +6,7 @@ import {
 } from 'discord.js';
 import { DiscordChannel } from './channels/discord.js';
 import type { InboundMessage } from './channels/types.js';
-import { discordConfig } from './config.js';
+import { discordConfig, PROJECT_AGENTS_ENABLED } from './config.js';
 import { handleMessage } from './bot.js';
 import { setDiscordConnected } from './state.js';
 import { registerSlashCommands, wireSlashCommands } from './discord-commands.js';
@@ -17,6 +17,9 @@ import {
   buildVideoMessage,
   buildDocumentMessage,
 } from './media.js';
+import { lookupAgentForChannel } from './discord-channel-map.js';
+import { getRegistryContext } from './agent-registry.js';
+import type { AgentContext } from './agent-context.js';
 
 const log = logger.child({ name: 'discord-bot' });
 
@@ -75,13 +78,34 @@ export function createDiscordBot(): Client | null {
     // allowedChannelIds filter below is skipped for DMs even if the list were non-empty.
     if (message.guildId !== discordConfig.guildId) return;
 
-    // Channel whitelist — an empty allowedChannelIds means "every channel in the guild".
-    // Explicitly populated lists restrict routing to those channel IDs only.
-    if (
-      discordConfig.allowedChannelIds.length > 0 &&
-      !discordConfig.allowedChannelIds.includes(message.channel.id)
-    ) {
-      return;
+    // Project-agent channel routing (feature-gated).
+    // If the incoming channel is mapped to a project agent, use that agent's
+    // context instead of the default. The mapping IS the ACL — no additional
+    // allowedChannelIds check is needed for routed channels.
+    let overrideCtx: AgentContext | undefined;
+    if (PROJECT_AGENTS_ENABLED) {
+      const routedAgentId = lookupAgentForChannel(message.channel.id);
+      if (routedAgentId) {
+        const ctx = getRegistryContext(routedAgentId);
+        if (ctx) {
+          overrideCtx = ctx;
+        } else {
+          log.warn(
+            { channelId: message.channel.id, agentId: routedAgentId },
+            'Channel mapped to unknown agent; falling back to default',
+          );
+        }
+      }
+    }
+
+    // If NOT routed via project agent, enforce the existing channel whitelist.
+    if (!overrideCtx) {
+      if (
+        discordConfig.allowedChannelIds.length > 0 &&
+        !discordConfig.allowedChannelIds.includes(message.channel.id)
+      ) {
+        return;
+      }
     }
 
     const channel = new DiscordChannel(message.channel as any, message.author);
@@ -129,7 +153,7 @@ export function createDiscordBot(): Client | null {
     };
 
     try {
-      await handleMessage(channel, inbound);
+      await handleMessage(channel, inbound, false, false, overrideCtx);
     } catch (err) {
       log.error({ err, chatKey: channel.chatKey }, 'discord handleMessage failed');
       try {

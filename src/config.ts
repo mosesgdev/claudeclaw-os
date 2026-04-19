@@ -43,6 +43,7 @@ const envConfig = readEnvFile([
   'DISCORD_ALLOWED_CHANNEL_IDS',
   'DISCORD_MAX_LENGTH',
   'VAULT_PROJECTS_ROOT',
+  'PROJECT_AGENTS_ENABLED',
 ]);
 
 // ── Multi-agent support ──────────────────────────────────────────────
@@ -299,6 +300,13 @@ const rawVaultProjectsRoot =
  * Override via VAULT_PROJECTS_ROOT in .env or environment.
  */
 export const VAULT_PROJECTS_ROOT = expandHome(rawVaultProjectsRoot);
+
+/**
+ * Enable project-agent routing (manifest-sourced agents + Discord channel map).
+ * Defaults to false during rollout. Flip to true after phase 1e validation.
+ */
+export const PROJECT_AGENTS_ENABLED =
+  (process.env.PROJECT_AGENTS_ENABLED || envConfig.PROJECT_AGENTS_ENABLED || 'false').toLowerCase() === 'true';
 
 // ── Discord Gateway ──────────────────────────────────────────────────
 export const discordConfig = {

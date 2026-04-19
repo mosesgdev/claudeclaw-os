@@ -1,14 +1,14 @@
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
 
 import { runAgent, UsageInfo } from './agent.js';
-import { loadAgentConfig, listAgentIds, resolveAgentClaudeMd, resolveAgentDir } from './agent-config.js';
-import { buildContextFromYaml } from './agent-context.js';
-import { PROJECT_ROOT } from './config.js';
 import { logToHiveMind, createInterAgentTask, completeInterAgentTask } from './db.js';
 import { logger } from './logger.js';
 import { buildMemoryContext } from './memory.js';
+import {
+  initAgentRegistry,
+  getRegistryEntries,
+  getRegistryContext,
+} from './agent-registry.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -28,43 +28,31 @@ export interface AgentInfo {
 
 // ── Registry ─────────────────────────────────────────────────────────
 
-/** Cache of available agents loaded at startup. */
-let agentRegistry: AgentInfo[] = [];
-
 /** Default timeout for a delegated task (5 minutes). */
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
- * Initialize the orchestrator by scanning `agents/` for valid configs.
+ * Initialize the orchestrator. Delegates agent discovery to agent-registry.ts.
  * Safe to call even if no agents are configured — the registry will be empty.
  */
 export function initOrchestrator(): void {
-  const ids = listAgentIds();
-  agentRegistry = [];
+  // initAgentRegistry is idempotent — safe to call even if already done.
+  initAgentRegistry();
 
-  for (const id of ids) {
-    try {
-      const config = loadAgentConfig(id);
-      agentRegistry.push({
-        id,
-        name: config.name,
-        description: config.description,
-      });
-    } catch (err) {
-      // Agent config is broken (e.g. missing token) — skip it but warn
-      logger.warn({ agentId: id, err }, 'Skipping agent — config load failed');
-    }
-  }
-
+  const agents = getRegistryEntries();
   logger.info(
-    { agents: agentRegistry.map((a) => a.id) },
+    { agents: agents.map((a) => a.id) },
     'Orchestrator initialized',
   );
 }
 
 /** Return all agents that were successfully loaded. */
 export function getAvailableAgents(): AgentInfo[] {
-  return [...agentRegistry];
+  return getRegistryEntries().map((e) => ({
+    id: e.id,
+    name: e.name,
+    description: e.description,
+  }));
 }
 
 // ── Delegation ───────────────────────────────────────────────────────
@@ -104,7 +92,7 @@ export function parseDelegation(
   );
   if (atMatchNoColon) {
     const candidate = atMatchNoColon[1];
-    if (agentRegistry.some((a) => a.id === candidate)) {
+    if (getRegistryEntries().some((a) => a.id === candidate)) {
       return { agentId: candidate, prompt: atMatchNoColon[2].trim() };
     }
   }
@@ -134,13 +122,14 @@ export async function delegateToAgent(
   onProgress?: (msg: string) => void,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<DelegationResult> {
-  const agent = agentRegistry.find((a) => a.id === agentId);
-  if (!agent) {
-    const available = agentRegistry.map((a) => a.id).join(', ') || '(none)';
+  const registryEntry = getRegistryEntries().find((a) => a.id === agentId);
+  if (!registryEntry) {
+    const available = getRegistryEntries().map((a) => a.id).join(', ') || '(none)';
     throw new Error(
       `Agent "${agentId}" not found. Available: ${available}`,
     );
   }
+  const agent = registryEntry;
 
   const taskId = crypto.randomUUID();
   const start = Date.now();
@@ -157,22 +146,13 @@ export async function delegateToAgent(
   onProgress?.(`Delegating to ${agent.name}...`);
 
   try {
-    // Load agent config to get its system prompt and MCP allowlist
-    const agentConfig = loadAgentConfig(agentId);
-    const agentDir = resolveAgentDir(agentId);
-    const claudeMdPath = resolveAgentClaudeMd(agentId);
-    let systemPrompt = '';
-    if (claudeMdPath) {
-      try {
-        systemPrompt = fs.readFileSync(claudeMdPath, 'utf-8');
-      } catch {
-        // No CLAUDE.md for this agent — that's fine
-      }
+    // Resolve AgentContext from the unified registry (works for both yaml and manifest agents).
+    const subAgentCtx = getRegistryContext(agentId);
+    if (!subAgentCtx) {
+      // Should not happen since we already found the entry above, but guard anyway.
+      throw new Error(`Agent "${agentId}" has no context in the registry`);
     }
-
-    // Build AgentContext from the loaded yaml so the sub-agent gets the right
-    // cwd, model, mcpServers, and systemPrompt without reading global state.
-    const subAgentCtx = buildContextFromYaml(agentId, agentConfig, agentDir, systemPrompt || undefined);
+    const systemPrompt = subAgentCtx.systemPrompt ?? '';
 
     // Build memory context for the delegated agent
     const { contextText: memCtx } = await buildMemoryContext(chatId, prompt, agentId);
