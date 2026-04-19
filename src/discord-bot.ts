@@ -9,6 +9,7 @@ import { DiscordChannel } from './channels/discord.js';
 import type { InboundMessage } from './channels/types.js';
 import { discordConfig } from './config.js';
 import { handleMessage } from './bot.js';
+import { registerSlashCommands, wireSlashCommands } from './discord-commands.js';
 
 const log = pino({ name: 'discord-bot' });
 
@@ -29,9 +30,19 @@ export function createDiscordBot(): Client | null {
     ],
   });
 
-  client.once(Events.ClientReady, (c) => {
+  // Single merged ClientReady handler: logs ready state and registers slash
+  // commands. Registration is wrapped in try/catch so a REST failure does not
+  // prevent the bot from logging in and handling messages.
+  client.once(Events.ClientReady, async (c) => {
     log.info({ tag: c.user.tag }, 'Discord client ready');
+    try {
+      await registerSlashCommands(c.user.id);
+    } catch (err) {
+      log.error({ err }, 'failed to register slash commands');
+    }
   });
+
+  wireSlashCommands(client);
 
   client.on(Events.MessageCreate, async (message: Message) => {
     if (message.author.bot) return;
