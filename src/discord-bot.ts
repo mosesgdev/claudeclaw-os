@@ -50,7 +50,21 @@ export function createDiscordBot(): Client | null {
     }
   });
 
-  client.on(Events.ShardDisconnect, () => setDiscordConnected(false));
+  // Track websocket connectivity across the whole shard lifecycle, not just
+  // the initial login — ClientReady fires exactly once, so a mid-runtime drop
+  // needs ShardReady / ShardResume to flip the indicator back to connected.
+  client.on(Events.ShardDisconnect, (_event, shardId) => {
+    log.warn({ shardId }, 'Discord shard disconnected');
+    setDiscordConnected(false);
+  });
+  client.on(Events.ShardReady, (shardId) => {
+    log.info({ shardId }, 'Discord shard ready');
+    setDiscordConnected(true);
+  });
+  client.on(Events.ShardResume, (shardId) => {
+    log.info({ shardId }, 'Discord shard resumed');
+    setDiscordConnected(true);
+  });
 
   wireSlashCommands(client);
 
