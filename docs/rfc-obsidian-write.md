@@ -29,8 +29,9 @@ Both paths go through the same bridge module, so output files are bit-compatible
 
 ## Design Principles
 
-- **Bridge lives in agentic-master, not claudeclaw** — keeps agentic-master self-contained per reviewer feedback. claudeclaw shells out to the bridge for the mirror hook, same as Claude Code sessions do via the skill.
-- **One write logic, two entry points.** Templates, routing, frontmatter, wiki-link injection — all in one module. No drift.
+- **Bridge lives in claudeclaw as a CLI** — agentic-master has no Node/TS toolchain (verified: no `package.json`, `tsconfig.json`; existing scripts are Bash/Python). The bridge is `src/vault-bridge-cli.ts` inside claudeclaw (compiled to `dist/vault-bridge-cli.js`), matching the pattern established by `memory-dedupe-cli` in phase 2a. Both callers (Claude Code skill, bot memory hook) shell into it.
+- **One write logic, two entry points.** Templates, routing, frontmatter, wiki-link injection — all in one CLI. No drift.
+- **Agentic-master dependency:** the `obsidian-write` skill in agentic-master expects `CLAUDECLAW_ROOT` (default `~/Services/claudeclaw`) to be installed. Skill degrades gracefully with a clear error if `dist/vault-bridge-cli.js` is missing.
 - **Fire-and-forget from the bot.** Vault writes never block Telegram/Discord responses.
 - **Idempotent.** Running the skill twice on the same content never creates duplicates.
 - **No shared filesystem write lock needed.** Obsidian handles concurrent writes fine since files are per-note; the bridge uses atomic write-then-rename to avoid partial reads.
@@ -185,19 +186,22 @@ Skill internals delegate to `bridge.ts` — the skill file itself is <200 lines 
 - Document in `~/agentic-master/docs/primers/obsidian-vault-expertise.md` (brief).
 - **No code yet.** Pure config.
 
-### Phase 2c — Bridge in agentic-master
+### Phase 2c — Bridge CLI in claudeclaw
 
-- New `~/agentic-master/skills/obsidian-write/bridge.ts` (or .js — pick based on what agentic-master conventions expect; check `ls ~/agentic-master/skills/*/` for existing examples).
-- Commands: `write`, `close-task`, `neighbors` (passthrough to dedupe CLI), `update-backlinks` (appends a wiki-link to another file's `related:` list).
-- Reads `expertise/obsidian-vault.yaml` at start. Templates loaded from `~/Documents/Obsidian/ClaudeClaw/_meta/templates/` if present, else inlined fallback.
+- New `src/vault-bridge-cli.ts` (compiled to `dist/vault-bridge-cli.js`). Matches the CLI pattern established by `memory-dedupe-cli` in 2a.
+- Commands: `write`, `close-task`, `update-backlinks` (appends a wiki-link to another file's `related:` list). `neighbors` is already in `memory-dedupe-cli` from 2a; bridge calls it internally for wiki-link injection rather than reimplementing.
+- Reads conventions from `<AGENTIC_MASTER_ROOT>/expertise/obsidian-vault.yaml` (path resolution: env var `AGENTIC_MASTER_ROOT`, default `~/agentic-master`). If the file is missing, falls back to hardcoded defaults matching the schema in the "Vault Conventions" section.
+- Templates loaded from `<VAULT_ROOT>/_meta/templates/` if present, else inlined fallbacks.
 - Atomic write: write to `.foo.md.tmp` + rename → `foo.md`. Ensures partial reads never happen while Obsidian is watching.
-- Tests: fixture vault in a tmpdir.
+- Refuses to write under `04-projects/<project>/` if the project manifest shows `status: archived`.
+- Tests: fixture vault in a tmpdir, 10+ cases covering all subcommands + atomicity + dedupe flow + wiki-link injection + archived-refusal.
 
-### Phase 2d — `obsidian-write` skill SKILL.md
+### Phase 2d — `obsidian-write` skill SKILL.md in agentic-master
 
-- Write the SKILL.md per the format in `~/agentic-master/skills/load-ai-docs/SKILL.md` (frontmatter, Runtime Context Loading, Variables, Workflow, Examples).
+- Write `~/agentic-master/skills/obsidian-write/SKILL.md` per the format of `~/agentic-master/skills/load-ai-docs/SKILL.md` (frontmatter, Runtime Context Loading, Variables, Workflow, Examples).
 - Add to `~/agentic-master/library.yaml` under a new "Knowledge Management" category.
-- No code — just orchestration markdown that invokes `bridge.ts`.
+- No compiled code — just orchestration markdown that resolves `CLAUDECLAW_ROOT` (default `~/Services/claudeclaw`) and invokes `node $CLAUDECLAW_ROOT/dist/vault-bridge-cli.js ...`.
+- Skill fails with a clear error message if the CLI is missing.
 
 ### Phase 2e — Memory mirror hook in claudeclaw
 
@@ -250,7 +254,7 @@ The bridge, skill, and expertise file all exist regardless — they're just not 
 ## Open Questions
 
 1. Do we also want `obsidian-read` as a separate skill (progressive session context loader)? Agentic-master reviewer recommended making it a `session_start.py` hook instead of a skill. **Decision: defer. RFC 3 can address read-side if needed.** For now the bot's extended `obsidian.ts` read path covers the memory-context use case.
-2. Bridge in Node (.ts/.js) vs Python? All examples in `~/agentic-master/skills/*/` that run shell commands are Bash; SKILL.md is orchestration markdown. The bridge itself is a real program. **Decision: Node/TS.** Matches claudeclaw's stack; lets us share the embedding function via a thin npm-style relative import.
+2. Bridge in Node (.ts/.js) vs Python? **Decision: Node/TS inside claudeclaw.** agentic-master has no Node/TS toolchain (verified: no package.json, no tsconfig). Putting the bridge in claudeclaw lets it share embeddings + DB access directly and matches the `memory-dedupe-cli` pattern from 2a. Skill in agentic-master shells into `dist/vault-bridge-cli.js`.
 3. Should archived manifests' vault folders be made read-only to the bridge? **Decision: yes.** Bridge refuses to write under `04-projects/<project>/` if the project manifest shows `status: archived`. Small check in 2c.
 
 ## Execution
