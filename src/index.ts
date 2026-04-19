@@ -17,6 +17,7 @@ import { initOAuthHealthCheck } from './oauth-health.js';
 import { initOrchestrator } from './orchestrator.js';
 import { initScheduler } from './scheduler.js';
 import { setTelegramConnected, setBotInfo } from './state.js';
+import { registerTransport, notifyUser } from './notify.js';
 
 // Parse --agent flag
 const agentFlagIndex = process.argv.indexOf('--agent');
@@ -182,6 +183,23 @@ async function main(): Promise<void> {
   // them fight for and disconnect each other.
   const discordClient = AGENT_ID === 'main' ? createDiscordBot() : null;
 
+  // Register notification transports for proactive fan-out (scheduler results,
+  // memory alerts, War Room errors). Telegram is always registered when a
+  // destination chat is known. Discord is registered only when a notify channel
+  // is explicitly configured via DISCORD_ALLOWED_CHANNEL_IDS[0].
+  registerTransport('telegram', async (text) => {
+    await bot.api.sendMessage(Number(ALLOWED_CHAT_ID), text);
+  });
+
+  if (discordClient && discordConfig.allowedChannelIds[0]) {
+    registerTransport('discord', async (text) => {
+      const channel = await discordClient.channels.fetch(discordConfig.allowedChannelIds[0]);
+      if (channel?.isTextBased()) {
+        await (channel as any).send({ content: text });
+      }
+    });
+  }
+
   // Dashboard only runs in the main bot process
   if (AGENT_ID === 'main') {
     startDashboard(bot.api);
@@ -218,7 +236,7 @@ async function main(): Promise<void> {
             + 'Then restart the bot.';
           logger.error(msg);
           if (ALLOWED_CHAT_ID) {
-            bot.api.sendMessage(ALLOWED_CHAT_ID, `War Room could not start.\n\n${msg}`).catch(() => {});
+            notifyUser(`War Room could not start.\n\n${msg}`).catch(() => {});
           }
         } else {
         // Dedicated log file for the warroom subprocess
@@ -274,7 +292,7 @@ async function main(): Promise<void> {
               if (respawnAttempts > MAX_CRASH_RESPAWNS) {
                 logger.error(`War Room crashed ${MAX_CRASH_RESPAWNS} times. Giving up. Check /tmp/warroom-debug.log for errors.`);
                 if (ALLOWED_CHAT_ID) {
-                  bot.api.sendMessage(ALLOWED_CHAT_ID, `War Room crashed ${MAX_CRASH_RESPAWNS} times and has been disabled.\n\nCheck /tmp/warroom-debug.log, fix the issue, and restart the bot.`).catch(() => {});
+                  notifyUser(`War Room crashed ${MAX_CRASH_RESPAWNS} times and has been disabled.\n\nCheck /tmp/warroom-debug.log, fix the issue, and restart the bot.`).catch(() => {});
                 }
                 return;
               }
@@ -305,7 +323,7 @@ async function main(): Promise<void> {
           : 'warroom/server.py not found. Make sure the warroom/ directory exists.';
         logger.warn('War Room enabled but cannot start: %s', hint);
         if (ALLOWED_CHAT_ID) {
-          bot.api.sendMessage(ALLOWED_CHAT_ID, `War Room is enabled but could not start.\n\n${hint}`).catch(() => {});
+          notifyUser(`War Room is enabled but could not start.\n\n${hint}`).catch(() => {});
         }
       }
     }
@@ -319,7 +337,7 @@ async function main(): Promise<void> {
         // callback is also called directly for status messages which may exceed the limit.
         const { splitMessage } = await import('./bot.js');
         for (const chunk of splitMessage(text)) {
-          await bot.api.sendMessage(ALLOWED_CHAT_ID, chunk, { parse_mode: 'HTML' }).catch((err) =>
+          await notifyUser(chunk).catch((err) =>
             logger.error({ err }, 'Scheduler failed to send message'),
           );
         }
@@ -338,7 +356,7 @@ async function main(): Promise<void> {
       initOAuthHealthCheck(async (text) => {
         const { splitMessage } = await import('./bot.js');
         for (const chunk of splitMessage(text)) {
-          await bot.api.sendMessage(ALLOWED_CHAT_ID, chunk, { parse_mode: 'HTML' }).catch((err) =>
+          await notifyUser(chunk).catch((err) =>
             logger.error({ err }, 'OAuth health alert failed'),
           );
         }

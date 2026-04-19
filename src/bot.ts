@@ -37,6 +37,7 @@ import { logger } from './logger.js';
 import { downloadMedia, buildPhotoMessage, buildDocumentMessage, buildVideoMessage } from './media.js';
 import { buildMemoryContext, evaluateMemoryRelevance, saveConversationTurn, shouldNudgeMemory, MEMORY_NUDGE_TEXT } from './memory.js';
 import { classifyMessageComplexity } from './message-classifier.js';
+import { notifyUser } from './notify.js';
 import { scanForSecrets, redactSecrets } from './exfiltration-guard.js';
 import { trackUsage, getRateStatus } from './rate-tracker.js';
 import { buildCostFooter } from './cost-footer.js';
@@ -886,7 +887,7 @@ export function createBot(): Bot {
   if (ALLOWED_CHAT_ID) {
     setHighImportanceCallback((memoryId, summary, importance) => {
       const msg = `🧠 New memory #${memoryId} [${importance.toFixed(1)}]: ${summary.slice(0, 200)}\n\n/pin ${memoryId} to make permanent`;
-      bot.api.sendMessage(ALLOWED_CHAT_ID, msg).catch(() => {});
+      notifyUser(msg).catch(() => {});
     });
   }
 
