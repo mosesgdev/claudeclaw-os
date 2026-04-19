@@ -10,6 +10,9 @@ export class DiscordChannel implements MessageChannel {
   readonly userLabel: string;
   readonly maxLength = 2000;
 
+  get rawChannel(): TextBasedChannel { return this.channel; }
+  get rawAuthor(): User { return this.author; }
+
   constructor(
     private readonly channel: TextBasedChannel,
     private readonly author: User,
@@ -19,6 +22,8 @@ export class DiscordChannel implements MessageChannel {
   }
 
   async send(text: string, options?: SendOptions): Promise<void> {
+    // Discord's API takes raw markdown — 'Markdown' and 'none' both pass through.
+    // Only 'HTML' requires conversion to Discord-flavored markdown.
     const mode = options?.parseMode ?? 'HTML';
     const body = mode === 'HTML' ? htmlToDiscordMarkdown(text) : text;
     await (this.channel as any).send({ content: body });
@@ -55,7 +60,8 @@ export function htmlToDiscordMarkdown(html: string): string {
     .replace(/<strong>([\s\S]*?)<\/strong>/g, '**$1**')
     .replace(/<i>([\s\S]*?)<\/i>/g, '*$1*')
     .replace(/<em>([\s\S]*?)<\/em>/g, '*$1*')
-    .replace(/<code>([\s\S]*?)<\/code>/g, '`$1`')
+    .replace(/<code>([\s\S]*?)<\/code>/g, (_, c: string) =>
+      '`' + c.replace(/`/g, '\\`') + '`')
     .replace(/<pre>([\s\S]*?)<\/pre>/g, '```\n$1\n```')
     .replace(/<a href="([^"]+)">([\s\S]*?)<\/a>/g, '[$2]($1)')
     .replace(/<br\s*\/?>/g, '\n')

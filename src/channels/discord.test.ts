@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { DiscordChannel } from './discord.js';
+import { DiscordChannel, htmlToDiscordMarkdown } from './discord.js';
 
 function makeFakeMessage(channelId = 'C1', userId = 'U1', userName = 'moses') {
   const send = vi.fn(async (_payload: any) => ({ id: 'msg1' }));
@@ -63,5 +63,19 @@ describe('DiscordChannel', () => {
     const call = msg.channel.send.mock.calls[0][0];
     expect(call.files).toHaveLength(1);
     expect(call.content).toBe('caption here');
+  });
+
+  it('rawChannel and rawAuthor expose the underlying discord.js objects', () => {
+    const msg = makeFakeMessage('C9', 'U9', 'zed');
+    const ch = new DiscordChannel(msg.channel as any, msg.author as any);
+    expect(ch.rawChannel).toBe(msg.channel);
+    expect(ch.rawAuthor).toBe(msg.author);
+  });
+});
+
+describe('htmlToDiscordMarkdown', () => {
+  it('escapes backticks inside <code> so inner ` does not close the span early', () => {
+    const out = htmlToDiscordMarkdown('run <code>git log `--oneline`</code> often');
+    expect(out).toBe('run `git log \\`--oneline\\`` often');
   });
 });
