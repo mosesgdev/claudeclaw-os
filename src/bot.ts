@@ -7,6 +7,7 @@ import { TelegramChannel } from './channels/telegram.js';
 
 import { runAgent, runAgentWithRetry, UsageInfo, AgentProgressEvent } from './agent.js';
 import { runCmuxCommand } from './cmux-command.js';
+import { maybeRouteToPmCockpit, formatCockpitReply } from './pm-cockpit.js';
 import { AgentError } from './errors.js';
 import type { AgentContext } from './agent-context.js';
 import { getDefaultAgentContext } from './agent-context.js';
@@ -37,6 +38,7 @@ import {
   PROJECT_ROOT,
   OBSIDIAN_WRITE_ENABLED,
   PROJECT_AGENTS_ENABLED,
+  CMUX_ENABLED,
 } from './config.js';
 import { clearSession, getRecentConversation, getRecentMemories, getRecentTaskOutputs, getSession, getSessionConversation, logToHiveMind, pinMemory, unpinMemory, setSession, lookupWaChatId, saveWaMessageMap, saveTokenUsage, saveCompactionEvent, getCompactionCount } from './db.js';
 import { logger } from './logger.js';
@@ -558,6 +560,18 @@ export async function handleMessage(channel: MessageChannel, inbound: InboundMes
   const effectiveModel = (SMART_ROUTING_ENABLED && !userModel && classifyMessageComplexity(message) === 'simple')
     ? SMART_ROUTING_CHEAP_MODEL
     : (userModel ?? 'claude-opus-4-6');
+
+  // ── PM cockpit routing (Phase 5a) ──────────────────────────────────
+  // When both flags are on and a persistent cockpit exists for this agent,
+  // send the raw message to the cmux workspace instead of spawning runAgent.
+  if (PROJECT_AGENTS_ENABLED && CMUX_ENABLED) {
+    const cockpitScreen = await maybeRouteToPmCockpit(agentCtx.agentId, message);
+    if (cockpitScreen !== null) {
+      setProcessing(chatIdStr, false);
+      await channel.send(formatCockpitReply(channel, cockpitScreen));
+      return;
+    }
+  }
 
   // Start typing immediately, then refresh on interval
   await channel.showTyping();

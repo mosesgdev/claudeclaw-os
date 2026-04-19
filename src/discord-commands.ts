@@ -7,15 +7,16 @@ import {
   type ChatInputCommandInteraction,
   type AutocompleteInteraction,
 } from 'discord.js';
-import { discordConfig, PROJECT_AGENTS_ENABLED } from './config.js';
+import { discordConfig, PROJECT_AGENTS_ENABLED, CMUX_ENABLED, expandHome, PROJECT_ROOT } from './config.js';
 import { clearSession, listMemories, forgetMemory } from './session-ops.js';
 import { logger } from './logger.js';
-import { rebuildRegistry } from './agent-registry.js';
+import { rebuildRegistry, getRegistryEntries } from './agent-registry.js';
 import { bootstrapDiscordChannelMap } from './discord-bootstrap.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { lookupAgentForChannel } from './discord-channel-map.js';
 import { runCmuxCommand } from './cmux-command.js';
 import { AGENT_ID } from './config.js';
+import { clearPmCockpits, ensurePmCockpit, setPmCockpit } from './pm-cockpit.js';
 
 const log = logger.child({ name: 'discord-commands' });
 
@@ -167,7 +168,30 @@ async function onReloadAgents(i: ChatInputCommandInteraction, client: Client): P
   try {
     rebuildRegistry();
     await bootstrapDiscordChannelMap(client);
-    await i.editReply('Agent registry rebuilt and Discord channel map refreshed.');
+
+    // Re-ensure PM cockpits for all manifest-sourced agents.
+    if (CMUX_ENABLED) {
+      clearPmCockpits();
+      const manifestEntries = getRegistryEntries().filter((e) => e.source === 'manifest');
+      for (const entry of manifestEntries) {
+        const workingDir = entry.manifest?.workingDir
+          ? expandHome(entry.manifest.workingDir)
+          : PROJECT_ROOT;
+        try {
+          const cockpit = await ensurePmCockpit(entry.id, workingDir);
+          if (cockpit) {
+            setPmCockpit(cockpit);
+            log.info({ agentId: entry.id, workspaceId: cockpit.workspaceId }, 'PM cockpit re-ensured on reload');
+          } else {
+            log.warn({ agentId: entry.id }, 'pm-cockpit: re-ensure returned null on reload');
+          }
+        } catch (err) {
+          log.warn({ agentId: entry.id, err }, 'pm-cockpit: error during reload re-ensure');
+        }
+      }
+    }
+
+    await i.editReply('Agent registry rebuilt, Discord channel map refreshed, PM cockpits re-ensured.');
   } catch (err) {
     log.error({ err }, 'reload-agents failed');
     await i.editReply('Reload failed — check logs for details.');

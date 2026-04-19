@@ -17,6 +17,8 @@ export interface ProjectManifest {
   hooks: string[];
   systemPrompt: string;
   sourcePath: string;
+  /** Optional working directory for the project agent's cockpit. Not expanded here — caller uses expandHome. */
+  workingDir?: string;
 }
 
 /**
@@ -91,6 +93,10 @@ export function parseManifest(filePath: string): ProjectManifest | null {
     hooks: Array.isArray(data['hooks']) ? (data['hooks'] as string[]) : [],
     systemPrompt: parsed.content.trim(),
     sourcePath: path.resolve(filePath),
+    workingDir:
+      typeof data['working_dir'] === 'string' && data['working_dir']
+        ? (data['working_dir'] as string)
+        : undefined,
   };
 }
 
