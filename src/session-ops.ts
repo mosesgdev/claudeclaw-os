@@ -53,11 +53,14 @@ export function listMemories(chatKey: string): MemoryRow[] {
 }
 
 /**
- * Permanently delete a memory by its integer id.
- * Accepts a string (from slash-command option) and coerces to integer.
+ * Permanently delete a memory by its integer id. Returns true if a row was
+ * deleted, false for non-numeric ids or ids that did not match any row.
+ * Callers (e.g. the /forget slash command) use the return value to avoid
+ * telling the user "done" when nothing actually changed.
  */
-export function forgetMemory(id: string): void {
+export function forgetMemory(id: string): boolean {
   const numId = parseInt(id, 10);
-  if (isNaN(numId)) return; // silently ignore non-numeric ids
-  getOpsDb().prepare('DELETE FROM memories WHERE id = ?').run(numId);
+  if (isNaN(numId)) return false;
+  const result = getOpsDb().prepare('DELETE FROM memories WHERE id = ?').run(numId);
+  return result.changes > 0;
 }

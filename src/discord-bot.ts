@@ -4,14 +4,14 @@ import {
   GatewayIntentBits,
   type Message,
 } from 'discord.js';
-import pino from 'pino';
 import { DiscordChannel } from './channels/discord.js';
 import type { InboundMessage } from './channels/types.js';
 import { discordConfig } from './config.js';
 import { handleMessage } from './bot.js';
 import { registerSlashCommands, wireSlashCommands } from './discord-commands.js';
+import { logger } from './logger.js';
 
-const log = pino({ name: 'discord-bot' });
+const log = logger.child({ name: 'discord-bot' });
 
 export function createDiscordBot(): Client | null {
   if (!discordConfig.enabled) {

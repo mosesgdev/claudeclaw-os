@@ -6,12 +6,11 @@ import {
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
 } from 'discord.js';
-import pino from 'pino';
-
 import { discordConfig } from './config.js';
 import { clearSession, listMemories, forgetMemory } from './session-ops.js';
+import { logger } from './logger.js';
 
-const log = pino({ name: 'discord-commands' });
+const log = logger.child({ name: 'discord-commands' });
 
 export const slashCommands = [
   new SlashCommandBuilder()
@@ -92,11 +91,22 @@ async function onMemory(i: ChatInputCommandInteraction): Promise<void> {
   const lines = memories
     .slice(0, 10)
     .map((m) => `• \`${m.id}\` — ${m.content}`);
-  await i.reply({ content: lines.join('\n').slice(0, 1990) });
+  // Truncate at the last newline before 2000 chars so we never slice mid-line
+  // and orphan a backtick pair, which Discord renders as broken inline code.
+  const joined = lines.join('\n');
+  const content =
+    joined.length <= 1990
+      ? joined
+      : joined.slice(0, joined.lastIndexOf('\n', 1990));
+  await i.reply({ content });
 }
 
 async function onForget(i: ChatInputCommandInteraction): Promise<void> {
   const id = i.options.getString('id', true);
-  forgetMemory(id);
-  await i.reply({ content: `forgot memory \`${id}\`` });
+  const deleted = forgetMemory(id);
+  await i.reply({
+    content: deleted
+      ? `forgot memory \`${id}\``
+      : `no memory with id \`${id}\``,
+  });
 }
