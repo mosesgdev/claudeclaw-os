@@ -6,7 +6,7 @@ import {
 } from 'discord.js';
 import { DiscordChannel } from './channels/discord.js';
 import type { InboundMessage } from './channels/types.js';
-import { discordConfig, PROJECT_AGENTS_ENABLED } from './config.js';
+import { discordConfig, PROJECT_AGENTS_ENABLED, SUBAGENT_ENABLED } from './config.js';
 import { handleMessage } from './bot.js';
 import { setDiscordConnected } from './state.js';
 import { registerSlashCommands, wireSlashCommands } from './discord-commands.js';
@@ -21,6 +21,9 @@ import { lookupAgentForChannel } from './discord-channel-map.js';
 import { getRegistryContext } from './agent-registry.js';
 import { resolveRoutingChannelId, resolveDiscordChatKey } from './discord-routing.js';
 import type { AgentContext } from './agent-context.js';
+import { getByThreadId } from './subagent-sessions.js';
+import * as cmux from './cmux.js';
+import { pollUntilStable } from './cmux-command.js';
 
 const log = logger.child({ name: 'discord-bot' });
 
@@ -78,6 +81,41 @@ export function createDiscordBot(): Client | null {
     // Guild boundary — drop messages from other servers AND DMs (DMs have no guildId).
     // allowedChannelIds filter below is skipped for DMs even if the list were non-empty.
     if (message.guildId !== discordConfig.guildId) return;
+
+    // ── Routing precedence: subagent > PM thread > default ────────────────────
+    // 1. If the channel is a thread AND SUBAGENT_ENABLED AND the thread is
+    //    tracked as a running subagent session, send to the subagent's cmux
+    //    workspace and return early — do NOT fall through to PM routing or runAgent.
+    // 2. If the session exists but is not running, fall through (treat as normal thread).
+    // 3. If not a subagent thread, or flag off, continue with existing routing.
+    if (SUBAGENT_ENABLED && message.channel.isThread()) {
+      const subSession = getByThreadId(message.channel.id);
+      if (subSession) {
+        if (subSession.status === 'running') {
+          const text = message.content;
+          try {
+            await cmux.send(subSession.workspaceId, text);
+            await cmux.sendKey(subSession.workspaceId, 'enter');
+            const screen = await pollUntilStable(subSession.workspaceId, 60_000);
+            const capped = screen.slice(-1900);
+            await message.channel.send('```\n' + capped + '\n```');
+          } catch (err) {
+            log.error({ err, workspaceId: subSession.workspaceId }, 'subagent cmux routing failed');
+            try {
+              await message.channel.send('subagent error — check logs');
+            } catch {
+              // best-effort
+            }
+          }
+          return;
+        } else {
+          log.debug(
+            { threadId: message.channel.id, status: subSession.status },
+            'subagent thread exists but not running — falling through to normal routing',
+          );
+        }
+      }
+    }
 
     // Resolve the channel ID to use for agent lookup. For thread messages,
     // this is the parent text channel's ID (the one stored in the map).
