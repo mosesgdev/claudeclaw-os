@@ -41,6 +41,7 @@ const envConfig = readEnvFile([
   'DISCORD_GUILD_ID',
   'DISCORD_ALLOWED_CHANNEL_IDS',
   'DISCORD_MAX_LENGTH',
+  'VAULT_PROJECTS_ROOT',
 ]);
 
 // ── Multi-agent support ──────────────────────────────────────────────
@@ -255,6 +256,21 @@ export const WARROOM_PORT = parseInt(
   process.env.WARROOM_PORT || envConfig.WARROOM_PORT || '7860',
   10,
 );
+
+// ── Project agents ───────────────────────────────────────────────────
+// Root directory that contains per-project Obsidian folders, each with
+// a context.md manifest. Defaults to the ClaudeClaw projects folder.
+const rawVaultProjectsRoot =
+  process.env.VAULT_PROJECTS_ROOT ||
+  envConfig.VAULT_PROJECTS_ROOT ||
+  '~/Documents/Obsidian/ClaudeClaw/04-projects';
+
+/**
+ * Absolute path to the vault's 04-projects directory.
+ * Defaults to ~/Documents/Obsidian/ClaudeClaw/04-projects.
+ * Override via VAULT_PROJECTS_ROOT in .env or environment.
+ */
+export const VAULT_PROJECTS_ROOT = expandHome(rawVaultProjectsRoot);
 
 // ── Discord Gateway ──────────────────────────────────────────────────
 export const discordConfig = {
