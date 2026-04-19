@@ -6,6 +6,7 @@ import type { MessageChannel, InboundMessage, Attachment } from './channels/type
 import { TelegramChannel } from './channels/telegram.js';
 
 import { runAgent, runAgentWithRetry, UsageInfo, AgentProgressEvent } from './agent.js';
+import { runCmuxCommand } from './cmux-command.js';
 import { AgentError } from './errors.js';
 import type { AgentContext } from './agent-context.js';
 import { getDefaultAgentContext } from './agent-context.js';
@@ -1290,6 +1291,23 @@ export function createBot(): Bot {
     await ctx.reply('Dashboard', { reply_markup: keyboard });
   });
 
+  // /cmux — drive a cmux.app workspace per chat+agent, running interactive `claude`.
+  //   /cmux              → status
+  //   /cmux <prompt>     → send prompt, wait for screen to stabilise, reply with screen
+  //   /cmux new          → force-create a fresh workspace
+  //   /cmux read         → just read the current screen
+  bot.command('cmux', async (ctx) => {
+    if (!isAuthorised(ctx.chat!.id)) return;
+    const chatId = ctx.chat!.id.toString();
+    const text = (ctx.message?.text ?? '').replace(/^\/cmux(@\S+)?\s*/i, '').trim();
+    const result = await runCmuxCommand({ chatId, agentId: AGENT_ID, text });
+    if (result.hasScreen && result.screen !== undefined) {
+      await ctx.reply(`<pre>${escapeHtml(result.screen)}</pre>`, { parse_mode: 'HTML' });
+    } else if (result.reply) {
+      await ctx.reply(result.reply);
+    }
+  });
+
   // /stop — interrupt the current agent query
   bot.command('stop', async (ctx) => {
     if (!isAuthorised(ctx.chat!.id)) return;
@@ -1376,7 +1394,7 @@ export function createBot(): Bot {
   });
 
   // Text messages — and any slash commands not owned by this bot (skills, e.g. /todo /gmail)
-  const OWN_COMMANDS = new Set(['/start', '/help', '/newchat', '/respin', '/voice', '/model', '/memory', '/forget', '/pin', '/unpin', '/chatid', '/wa', '/slack', '/dashboard', '/stop', '/agents', '/delegate', '/lock', '/status']);
+  const OWN_COMMANDS = new Set(['/start', '/help', '/newchat', '/respin', '/voice', '/model', '/memory', '/forget', '/pin', '/unpin', '/chatid', '/wa', '/slack', '/dashboard', '/stop', '/agents', '/delegate', '/lock', '/status', '/cmux']);
   bot.on('message:text', async (ctx) => {
     const text = ctx.message.text;
     const chatIdStr = ctx.chat!.id.toString();

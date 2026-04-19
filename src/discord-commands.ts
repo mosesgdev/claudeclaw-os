@@ -14,6 +14,8 @@ import { rebuildRegistry } from './agent-registry.js';
 import { bootstrapDiscordChannelMap } from './discord-bootstrap.js';
 import { delegateToAgent, getAvailableAgents } from './orchestrator.js';
 import { lookupAgentForChannel } from './discord-channel-map.js';
+import { runCmuxCommand } from './cmux-command.js';
+import { AGENT_ID } from './config.js';
 
 const log = logger.child({ name: 'discord-commands' });
 
@@ -48,6 +50,15 @@ export const slashCommands = [
         .setName('prompt')
         .setDescription('What to ask the agent')
         .setRequired(true),
+    ),
+  new SlashCommandBuilder()
+    .setName('cmux')
+    .setDescription('Drive a per-chat cmux workspace running interactive claude (requires CMUX_ENABLED)')
+    .addStringOption((o) =>
+      o
+        .setName('prompt')
+        .setDescription('Prompt to send, or "status" / "new" / "read" / empty for status')
+        .setRequired(false),
     ),
 ].map((c) => c.toJSON());
 
@@ -97,6 +108,8 @@ export function wireSlashCommands(client: Client): void {
           return await onReloadAgents(interaction, interaction.client);
         case 'ask':
           return await onAsk(interaction);
+        case 'cmux':
+          return await onCmux(interaction);
       }
     } catch (err) {
       log.error({ err, cmd: interaction.commandName }, 'slash command failed');
@@ -211,5 +224,30 @@ async function onAsk(i: ChatInputCommandInteraction): Promise<void> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await i.editReply(`ask failed: ${msg}`.slice(0, 1900));
+  }
+}
+
+async function onCmux(i: ChatInputCommandInteraction): Promise<void> {
+  const text = i.options.getString('prompt', false) ?? '';
+  // Thread-aware chatKey: matches the same shape the MessageCreate handler uses.
+  const isThread = i.channel?.isThread?.() === true;
+  const chatKey = isThread
+    ? `discord:thread:${i.channelId}`
+    : `discord:channel:${i.channelId}`;
+  // Prefer the channel's mapped agent so project PMs each own their own workspace.
+  const routingChannelId =
+    isThread && (i.channel as { parentId?: string } | null)?.parentId
+      ? (i.channel as { parentId: string }).parentId
+      : i.channelId;
+  const agentId = lookupAgentForChannel(routingChannelId) ?? AGENT_ID;
+
+  await i.deferReply();
+  const result = await runCmuxCommand({ chatId: chatKey, agentId, text });
+  if (result.hasScreen && result.screen !== undefined) {
+    // Discord supports triple-backtick code fences; cap at 1900 chars so fence + tail fit under the 2000 limit.
+    const capped = result.screen.slice(-1900);
+    await i.editReply('```\n' + capped + '\n```');
+  } else {
+    await i.editReply(result.reply ?? '(no response)');
   }
 }
