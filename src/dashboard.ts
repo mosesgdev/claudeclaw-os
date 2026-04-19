@@ -70,7 +70,7 @@ import { getDashboardHtml } from './dashboard-html.js';
 import { getWarRoomHtml } from './warroom-html.js';
 import { WARROOM_ENABLED, WARROOM_PORT } from './config.js';
 import { logger } from './logger.js';
-import { getTelegramConnected, getBotInfo, chatEvents, getIsProcessing, abortActiveQuery, ChatEvent } from './state.js';
+import { getTelegramConnected, getDiscordConnected, getBotInfo, chatEvents, getIsProcessing, abortActiveQuery, ChatEvent } from './state.js';
 
 async function classifyTaskAgent(prompt: string): Promise<string | null> {
   try {
@@ -961,6 +961,7 @@ export function startDashboard(botApi?: Api<RawApi>): void {
       sessionAge,
       model: agentDefaultModel || 'sonnet-4-6',
       telegramConnected: getTelegramConnected(),
+      discordConnected: getDiscordConnected(),
       waConnected: WHATSAPP_ENABLED,
       slackConnected: !!SLACK_USER_TOKEN,
     });

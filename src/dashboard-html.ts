@@ -576,9 +576,10 @@ ${WARROOM_ENABLED ? `<div class="card" style="border:1px solid #1e3a5f">
   </div>
   <div class="flex gap-3 mt-1">
     <span class="pill" id="tg-pill">Telegram</span>
+    <span class="pill" id="discord-pill">Discord</span>
     <span class="pill" id="wa-pill">WhatsApp</span>
     <span class="pill" id="slack-pill">Slack</span>
-    <span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Connection status for messaging platforms (Telegram, WhatsApp, Slack). Green = connected, Red = disconnected.</span></span>
+    <span class="info-tip"><span class="info-icon">\u24D8</span><span class="info-tooltip">Connection status for messaging platforms (Telegram, Discord, WhatsApp, Slack). Green = connected, Red = disconnected.</span></span>
   </div>
 </div>
 
@@ -990,6 +991,8 @@ async function loadHealth() {
 
     const tgPill = document.getElementById('tg-pill');
     tgPill.className = 'pill ' + (data.telegramConnected ? 'pill-connected' : 'pill-disconnected');
+    const discordPill = document.getElementById('discord-pill');
+    discordPill.className = 'pill ' + (data.discordConnected ? 'pill-connected' : 'pill-disconnected');
     const waPill = document.getElementById('wa-pill');
     waPill.className = 'pill ' + (data.waConnected ? 'pill-connected' : 'pill-disconnected');
     const slackPill = document.getElementById('slack-pill');

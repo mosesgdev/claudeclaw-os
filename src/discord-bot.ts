@@ -8,6 +8,7 @@ import { DiscordChannel } from './channels/discord.js';
 import type { InboundMessage } from './channels/types.js';
 import { discordConfig } from './config.js';
 import { handleMessage } from './bot.js';
+import { setDiscordConnected } from './state.js';
 import { registerSlashCommands, wireSlashCommands } from './discord-commands.js';
 import { logger } from './logger.js';
 import {
@@ -41,12 +42,15 @@ export function createDiscordBot(): Client | null {
   // prevent the bot from logging in and handling messages.
   client.once(Events.ClientReady, async (c) => {
     log.info({ tag: c.user.tag }, 'Discord client ready');
+    setDiscordConnected(true);
     try {
       await registerSlashCommands(c.user.id);
     } catch (err) {
       log.error({ err }, 'failed to register slash commands');
     }
   });
+
+  client.on(Events.ShardDisconnect, () => setDiscordConnected(false));
 
   wireSlashCommands(client);
 

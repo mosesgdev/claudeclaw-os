@@ -26,6 +26,18 @@ export function setTelegramConnected(v: boolean): void {
   _telegramConnected = v;
 }
 
+// ── Discord connection state ─────────────────────────────────────────
+
+let _discordConnected = false;
+
+export function getDiscordConnected(): boolean {
+  return _discordConnected;
+}
+
+export function setDiscordConnected(v: boolean): void {
+  _discordConnected = v;
+}
+
 // ── Chat event bus (SSE broadcasting) ────────────────────────────────
 
 export interface ChatEvent {
