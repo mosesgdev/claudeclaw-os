@@ -9,6 +9,8 @@ import {
   getRegistryEntries,
   getRegistryContext,
 } from './agent-registry.js';
+import { PROJECT_AGENTS_ENABLED } from './config.js';
+import { sendProjectLog } from './project-logs.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -200,6 +202,10 @@ export async function delegateToAgent(
         `${agent.name} completed (${Math.round(durationMs / 1000)}s)`,
       );
 
+      if (PROJECT_AGENTS_ENABLED) {
+        void sendProjectLog(fromAgent, 'info', `[mission] Delegated to ${agentId}: "${prompt.slice(0, 100)}"`);
+      }
+
       return {
         agentId,
         text: result.text,
@@ -221,6 +227,9 @@ export async function delegateToAgent(
       'delegate_error',
       `Delegation from ${fromAgent} failed: ${errMsg.slice(0, 120)}`,
     );
+    if (PROJECT_AGENTS_ENABLED) {
+      void sendProjectLog(fromAgent, 'warn', `[mission] Delegation to ${agentId} failed: ${errMsg.slice(0, 100)}`);
+    }
     throw err;
   }
 }

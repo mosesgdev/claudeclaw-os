@@ -49,7 +49,7 @@ const baseManifest: ProjectManifest = {
   status: 'active',
   vaultRoot: '04-projects/archisell',
   memoryNamespace: 'archisell',
-  discord: { category: 'archisell', primaryChannel: 'pm-archisell' },
+  discord: { category: 'archisell', primaryChannel: 'pm-archisell', logsChannel: 'logs' },
   skills: ['gmail'],
   experts: [],
   hooks: [],

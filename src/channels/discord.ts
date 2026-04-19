@@ -16,8 +16,9 @@ export class DiscordChannel implements MessageChannel {
   constructor(
     private readonly channel: TextBasedChannel,
     private readonly author: User,
+    chatKey?: string,
   ) {
-    this.chatKey = `discord:${channel.id}`;
+    this.chatKey = chatKey ?? `discord:channel:${channel.id}`;
     this.userLabel = author.username;
   }
 

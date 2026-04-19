@@ -10,6 +10,7 @@ import {
   clearStaleMappings,
   listMappings,
 } from './discord-channel-map.js';
+import { setProjectLogsMap, type ProjectLogsMap } from './project-logs.js';
 import { logger } from './logger.js';
 
 const log = logger.child({ name: 'discord-bootstrap' });
@@ -43,6 +44,7 @@ export async function bootstrapDiscordChannelMap(client: Client): Promise<void> 
 
   const entries = getRegistryEntries().filter((e) => e.source === 'manifest' && e.manifest);
   const activeAgentIds: string[] = [];
+  const collectedLogsMap: ProjectLogsMap = {};
 
   for (const entry of entries) {
     const m = entry.manifest!;
@@ -90,11 +92,37 @@ export async function bootstrapDiscordChannelMap(client: Client): Promise<void> 
       channelName: m.discord.primaryChannel,
     });
     activeAgentIds.push(entry.id);
-    log.info(
-      { project: m.project, agentId: entry.id, channelId: channel.id },
-      'Mapped Discord channel to project agent',
+
+    // Resolve logs channel under the same category
+    const logsChannelName = m.discord.logsChannel ?? 'logs';
+    const logsChannel = [...channels.values()].find(
+      (c): c is NonNullable<typeof c> =>
+        !!c &&
+        c.type === ChannelType.GuildText &&
+        'parentId' in c &&
+        (c as { parentId: string | null }).parentId === category.id &&
+        c.name === logsChannelName,
     );
+    if (logsChannel) {
+      collectedLogsMap[entry.id] = logsChannel.id;
+      log.info(
+        { project: m.project, agentId: entry.id, channelId: channel.id, logsChannelId: logsChannel.id },
+        `Mapped project "${m.project}" → #${m.discord.primaryChannel} (primary) + #${logsChannelName} (logs)`,
+      );
+    } else {
+      log.warn(
+        { project: m.project, logsChannel: logsChannelName, category: m.discord.category },
+        `Logs channel not found for project ${m.project}; continuing without logs routing`,
+      );
+      log.info(
+        { project: m.project, agentId: entry.id, channelId: channel.id },
+        `Mapped project "${m.project}" → #${m.discord.primaryChannel} (primary)`,
+      );
+    }
   }
+
+  // Populate in-memory logs map (rebuilt on every bootstrap / /reload-agents)
+  setProjectLogsMap(collectedLogsMap);
 
   // Preserve yaml-agent mappings (there should be none at this stage, but
   // future-proof: a yaml agent might be explicitly mapped out-of-band).

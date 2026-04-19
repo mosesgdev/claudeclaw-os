@@ -5,6 +5,15 @@ vi.mock('./gemini.js', () => ({
   parseJsonResponse: vi.fn(),
 }));
 
+vi.mock('./project-logs.js', () => ({
+  sendProjectLog: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock('./config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./config.js')>();
+  return { ...actual, PROJECT_AGENTS_ENABLED: true };
+});
+
 vi.mock('./db.js', () => ({
   saveStructuredMemoryAtomic: vi.fn(() => 1),
   getMemoriesWithEmbeddings: vi.fn(() => []),
@@ -22,6 +31,7 @@ vi.mock('./logger.js', () => ({
 import { ingestConversationTurn, setHighImportanceCallback, setMirrorCallback } from './memory-ingest.js';
 import { generateContent, parseJsonResponse } from './gemini.js';
 import { saveStructuredMemoryAtomic } from './db.js';
+import { sendProjectLog } from './project-logs.js';
 
 const mockGenerateContent = vi.mocked(generateContent);
 const mockParseJson = vi.mocked(parseJsonResponse);
@@ -456,5 +466,59 @@ describe('mirror callback', () => {
 
     expect(notification).not.toHaveBeenCalled();
     expect(mirror).toHaveBeenCalledOnce();
+  });
+});
+
+// ── sendProjectLog emitter (RFC 3b) ────────────────────────────────────────
+describe('sendProjectLog emitter in memory-ingest', () => {
+  const mockSendProjectLog = vi.mocked(sendProjectLog);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setHighImportanceCallback(null as unknown as Parameters<typeof setHighImportanceCallback>[0]);
+    setMirrorCallback(null as unknown as Parameters<typeof setMirrorCallback>[0]);
+  });
+
+  function makeExtraction(importance: number) {
+    return {
+      skip: false,
+      summary: 'A lasting preference about something meaningful',
+      entities: ['entity'],
+      topics: ['topic-a'],
+      importance,
+    };
+  }
+
+  async function ingestWith(importance: number, agentId = 'testAgent') {
+    const ext = makeExtraction(importance);
+    mockGenerateContent.mockResolvedValue(JSON.stringify(ext));
+    mockParseJson.mockReturnValue(ext);
+    return ingestConversationTurn('chat1', 'a long enough message about something worth remembering', 'noted', agentId);
+  }
+
+  // Case 1: PROJECT_AGENTS_ENABLED=true (default from module mock above) → fires
+  it('fires sendProjectLog at importance 0.8 with correct content', async () => {
+    await ingestWith(0.8, 'testAgent');
+    // Allow the void promise to settle
+    await Promise.resolve();
+
+    expect(mockSendProjectLog).toHaveBeenCalledOnce();
+    const [agentId, level, message] = mockSendProjectLog.mock.calls[0];
+    expect(agentId).toBe('testAgent');
+    expect(level).toBe('info');
+    expect(message).toMatch(/^\[memory\] Saved: "A lasting preference/);
+    expect(message).toMatch(/\(importance 0\.80\)$/);
+  });
+
+  // Case 2: importance below 0.8 threshold — sendProjectLog still fires (threshold is on save, not notify)
+  // The emitter fires whenever the memory is saved (importance >= 0.5) and PROJECT_AGENTS_ENABLED=true.
+  it('fires sendProjectLog for a saved memory at importance 0.5', async () => {
+    await ingestWith(0.5, 'testAgent');
+    await Promise.resolve();
+
+    expect(mockSendProjectLog).toHaveBeenCalledOnce();
+    const [agentId, level] = mockSendProjectLog.mock.calls[0];
+    expect(agentId).toBe('testAgent');
+    expect(level).toBe('info');
   });
 });
