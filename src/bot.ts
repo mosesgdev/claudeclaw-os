@@ -374,7 +374,7 @@ async function replyIfLocked(ctx: Context): Promise<boolean> {
  * @param forceVoiceReply  When true, always respond with audio (e.g. user sent a voice note).
  * @param skipLog  When true, skip logging this turn to conversation_log (used by /respin to avoid self-referential logging).
  */
-async function handleMessage(channel: MessageChannel, inbound: InboundMessage, forceVoiceReply = false, skipLog = false): Promise<void> {
+export async function handleMessage(channel: MessageChannel, inbound: InboundMessage, forceVoiceReply = false, skipLog = false): Promise<void> {
   const message = inbound.text;
   const chatIdStr = inbound.chatKey.replace(/^telegram:/, '');
   const chatId = parseInt(chatIdStr, 10);
